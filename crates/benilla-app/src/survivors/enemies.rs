@@ -41,6 +41,8 @@ pub(super) struct Dot {
     pub dps: f32,
     pub left: f32,
     pub tick: f32,
+    /// The spell the damage meter credits.
+    pub source: u32,
 }
 
 /// A corpse playing its death before it fades.
@@ -369,7 +371,10 @@ pub(super) fn move_enemies(
                 fx.number(hero_e, taken, false, COLOR_HURT);
             }
             if run.thorns_t > 0.0 {
-                hits.write(Hit::direct(ent, run.thorns * run.stats().might, false));
+                hits.write(Hit {
+                    source: run.thorns_spell,
+                    ..Hit::direct(ent, run.thorns * run.stats().might, false)
+                });
             }
         }
     }

@@ -36,7 +36,13 @@ fn lin(c: Color) -> Vec4 {
 impl FillMaterial {
     /// Top to bottom through `mid` at `mid_at` (0..1), with corners rounded by `radius`, a
     /// fraction of the node's height.
-    pub(super) fn vertical(top: Color, mid: Color, mid_at: f32, bottom: Color, radius: f32) -> Self {
+    pub(super) fn vertical(
+        top: Color,
+        mid: Color,
+        mid_at: f32,
+        bottom: Color,
+        radius: f32,
+    ) -> Self {
         Self {
             fill: FillUniform {
                 a: lin(top),

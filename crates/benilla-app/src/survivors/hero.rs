@@ -525,7 +525,9 @@ mod tests {
     }
 
     fn left_held(world: &World) -> bool {
-        world.resource::<ButtonInput<MouseButton>>().pressed(MouseButton::Left)
+        world
+            .resource::<ButtonInput<MouseButton>>()
+            .pressed(MouseButton::Left)
     }
 
     #[test]
@@ -533,10 +535,16 @@ mod tests {
         let mut world = held_left();
         world.run_system_once(drop_stray_buttons).unwrap();
         assert!(left_held(&world), "nothing happened: the drag goes on");
-        world.write_message(WindowFocused { window: Entity::PLACEHOLDER, focused: true });
+        world.write_message(WindowFocused {
+            window: Entity::PLACEHOLDER,
+            focused: true,
+        });
         world.run_system_once(drop_stray_buttons).unwrap();
         assert!(left_held(&world), "gaining focus is no release");
-        world.write_message(WindowFocused { window: Entity::PLACEHOLDER, focused: false });
+        world.write_message(WindowFocused {
+            window: Entity::PLACEHOLDER,
+            focused: false,
+        });
         world.run_system_once(drop_stray_buttons).unwrap();
         assert!(!left_held(&world));
     }
@@ -544,7 +552,9 @@ mod tests {
     #[test]
     fn a_held_button_is_dropped_when_the_pointer_leaves_the_page() {
         let mut world = held_left();
-        world.write_message(CursorLeft { window: Entity::PLACEHOLDER });
+        world.write_message(CursorLeft {
+            window: Entity::PLACEHOLDER,
+        });
         world.run_system_once(drop_stray_buttons).unwrap();
         assert!(!left_held(&world));
     }

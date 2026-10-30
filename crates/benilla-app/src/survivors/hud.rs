@@ -164,6 +164,8 @@ pub(super) enum UiAction {
     Resume,
     MainMenu,
     Quit,
+    /// Opens the Settings panel (`super::settings`).
+    Settings,
     /// Cycles the graphics preset (Android; `super::graphics`).
     #[cfg(target_os = "android")]
     Graphics,
@@ -275,7 +277,11 @@ fn icon(spell: u32, size: f32) -> impl Bundle {
     )
 }
 
-fn spell_name(spells: Option<&crate::ui_action::Spells>, spell: u32, fallback: &str) -> String {
+pub(super) fn spell_name(
+    spells: Option<&crate::ui_action::Spells>,
+    spell: u32,
+    fallback: &str,
+) -> String {
     spells
         .and_then(|s| s.catalog.get(spell))
         .map(|d| d.name.clone())
@@ -735,6 +741,7 @@ pub(super) fn setup_hud(
             root.spawn(centered(f, "Paused", 46.0, GOLD));
             for (label, action) in [
                 ("Resume", UiAction::Resume),
+                ("Settings", UiAction::Settings),
                 ("Abandon run", UiAction::MainMenu),
                 ("Quit game", UiAction::Quit),
             ] {
@@ -835,6 +842,17 @@ pub(super) fn setup_hud(
                 }
             });
             root.spawn((OverStats, centered(f, "", 15.0, DIM)));
+            // The damage meter's breakdown (`super::meter`), filled at the end of each run.
+            root.spawn((
+                super::meter::MeterList,
+                Node {
+                    width: Val::Px(560.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(3.0),
+                    margin: UiRect::vertical(Val::Px(6.0)),
+                    ..default()
+                },
+            ));
             root.spawn((
                 edged_button(UiAction::MainMenu, BUTTON, GOLD),
                 Node {

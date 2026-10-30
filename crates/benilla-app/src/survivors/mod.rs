@@ -16,8 +16,10 @@ mod graphics;
 mod hero;
 mod hud;
 mod menu;
+mod meter;
 mod minimap;
 mod mobility;
+mod settings;
 #[cfg(target_os = "android")]
 mod touch;
 mod units;
@@ -43,7 +45,7 @@ impl Plugin for SurvivorsPlugin {
     fn build(&self, app: &mut App) {
         // Present before `OnEnter(InWorld)`, where the UI lifecycle decides not to load FrameXML.
         app.insert_resource(crate::run_mode::CaptureMode)
-            .add_plugins(grade::plugin)
+            .add_plugins((grade::plugin, meter::plugin, settings::plugin))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -245,6 +247,15 @@ pub(super) const BASE_HP: f32 = 120.0;
 pub(super) const BASE_SPEED: f32 = 7.0;
 pub(super) const BASE_MAGNET: f32 = 4.5;
 
+/// One damage-meter line: everything a spell dealt this run.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct MeterRow {
+    pub source: u32,
+    pub damage: f64,
+    /// When it first hit, so its damage per second counts only the time it was in play.
+    pub since: f32,
+}
+
 /// One run's state.
 #[derive(Resource)]
 pub(super) struct Run {
@@ -275,6 +286,8 @@ pub(super) struct Run {
     pub dead_t: Option<f32>,
     pub next_guid: u64,
     pub damage_done: f64,
+    /// The damage meter: per crediting spell, the damage dealt and the run time of its first hit.
+    pub meter: Vec<MeterRow>,
     /// Bumped whenever abilities or passives change, so the HUD rebuilds the icon rows once.
     pub version: u32,
     /// A centre-screen announcement and its seconds left.
@@ -309,6 +322,7 @@ impl Default for Run {
             dead_t: None,
             next_guid: 1,
             damage_done: 0.0,
+            meter: Vec::new(),
             version: 0,
             banner: None,
         }
@@ -316,6 +330,21 @@ impl Default for Run {
 }
 
 impl Run {
+    /// Credit `damage` to `source` (a spell, 0 for unattributed) and to the run's total.
+    pub fn record(&mut self, source: u32, damage: f32) {
+        let damage = f64::from(damage);
+        self.damage_done += damage;
+        let now = self.elapsed;
+        match self.meter.iter_mut().find(|r| r.source == source) {
+            Some(row) => row.damage += damage,
+            None => self.meter.push(MeterRow {
+                source,
+                damage,
+                since: now,
+            }),
+        }
+    }
+
     pub fn stats(&self) -> Stats {
         let mut s = Stats {
             might: 1.0,

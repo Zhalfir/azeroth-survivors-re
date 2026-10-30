@@ -24,6 +24,8 @@ pub(super) struct Hit {
     pub splash: f32,
     pub crit: bool,
     pub color: u32,
+    /// The spell the damage meter credits ([`Run::record`]), 0 for none.
+    pub source: u32,
 }
 
 impl Hit {
@@ -39,6 +41,7 @@ impl Hit {
             splash: 0.0,
             crit,
             color: COLOR_MELEE,
+            source: 0,
         }
     }
 }
@@ -61,6 +64,8 @@ pub(super) struct GroundArea {
     mark: u32,
     /// The spell whose impact plays on each enemy a tick hits, 0 for none.
     impact: u32,
+    /// The ability's spell, for the damage meter.
+    source: u32,
 }
 
 #[derive(Component)]
@@ -72,6 +77,8 @@ pub(super) struct Totem {
     left: f32,
     tick: f32,
     pulse: bool,
+    /// The ability's spell, for the damage meter.
+    source: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -122,6 +129,7 @@ fn hit_for(def: &AbilityDef, p: &Params, target: Entity, damage: f32, crit: bool
         } else {
             COLOR_SPELL
         },
+        source: def.spell,
     }
 }
 
@@ -356,6 +364,7 @@ pub(super) fn cast_abilities(
                             effect: def.effect,
                             mark: def.mark,
                             impact: if def.overhead { def.spell } else { 0 },
+                            source: def.spell,
                         });
                         true
                     }
@@ -521,6 +530,7 @@ pub(super) fn cast_abilities(
                         left: p.duration,
                         tick: 0.3,
                         pulse: def.key == "magma_totem",
+                        source: def.spell,
                     });
                     true
                 } else {
@@ -589,6 +599,7 @@ pub(super) fn tick_areas(
                     splash: 0.0,
                     crit,
                     color: COLOR_SPELL,
+                    source: area.source,
                 });
             }
         }
@@ -622,6 +633,7 @@ pub(super) fn tick_areas(
                 let (dmg, crit) = roll(&mut rng, stats.crit, totem.damage);
                 hits.write(Hit {
                     color: COLOR_SPELL,
+                    source: totem.source,
                     ..Hit::direct(f.e, dmg, crit)
                 });
             }
@@ -647,6 +659,7 @@ pub(super) fn tick_areas(
                 delay,
                 Hit {
                     color: COLOR_SPELL,
+                    source: totem.source,
                     ..Hit::direct(f.e, dmg, crit)
                 },
             );
@@ -740,7 +753,7 @@ pub(super) fn apply_hits(
         }
         if dmg > 0.0 {
             en.hp -= dmg;
-            run.damage_done += f64::from(dmg);
+            run.record(h.source, dmg);
             fx.number(e, dmg, h.crit, h.color);
             if let Effect::Drain(frac) = h.effect {
                 let max = run.stats().max_hp;
@@ -755,6 +768,7 @@ pub(super) fn apply_hits(
                 dps: h.dot,
                 left: h.dot_dur,
                 tick: 1.0,
+                source: h.source,
             });
         }
         let boss = en.boss;
@@ -796,12 +810,12 @@ pub(super) fn apply_hits(
             if d.tick <= 0.0 {
                 d.tick += 1.0;
                 dealt += d.dps;
+                run.record(d.source, d.dps);
             }
         }
         en.dots.retain(|d| d.left > 0.0);
         if dealt > 0.0 {
             en.hp -= dealt;
-            run.damage_done += f64::from(dealt);
             fx.number(e, dealt, false, COLOR_SPELL);
             if en.hp <= 0.0 {
                 kill(&mut commands, &mut run, e, tf.translation, &mut en);
