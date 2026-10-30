@@ -52,7 +52,8 @@ from **talents** and **gear**; there are no character levels.
 ## Characters
 
 - Saved characters, WoW-style select screen: name, race, class, gender. **At most 8.** Create and
-  **Delete** (confirm by typing the name).
+  **Delete**. A NativeActivity has no on-screen keyboard, so names are generated WoW-style with a
+  re-roll button, and Delete confirms with a second tap instead of a typed name. (Built.)
 - Each character keeps: talents, completed map/difficulty list, equipped gear, bags.
 - One file per character in the save folder (`benilla-config/characters/`).
 
@@ -70,6 +71,15 @@ does (`data::progress`).
   the **boss loot chest** (gear, kept only on completion).
 - Candidates for later: a gold-coin drop if a currency is added, a magnet pickup that pulls every
   gem on screen, a short-lived damage buff (Elixir of the Mongoose / Giants).
+
+## Records: an arcade high-score table per map
+
+- Every map keeps a **top 10** like an old arcade cabinet: kills, time survived, class, difficulty,
+  date. Saved locally.
+- When a run (won or lost) makes the table, the game asks for **three initials** the arcade way:
+  up/down arrows per letter, then OK. Works without a keyboard.
+- A **Records** page from the menu shows each map's table; the current character's entries
+  highlighted.
 
 ## Combat stats: damage meter
 
@@ -123,13 +133,19 @@ Much of the loop is already in the game and gets reshaped rather than written:
 Each phase ends with a build that plays on the tablet. Nothing is built for a phase until the
 plan for it is agreed.
 
+After the gameplay phases: a **balance pass**, driving many runs with the built-in auto-player
+(`survivors/auto.rs`) across classes, zones and difficulties to catch errors and scaling problems
+(win rates, time-to-kill, deaths by minute), then tuning, reviewed against Vampire Survivors'
+design principles.
+
 1. **Settings and meter:** the Sound panel next to Graphics; the damage meter (results screen
    first, then the live one). Small, and it makes every later phase easier to tune.
 2. **Characters and completion:** create (the existing pick screen) / select / delete, max 8;
    difficulty choice with Normal 10 / Heroic 15 / Mythic 20 minute timers; a final boss at the
    timer, the map completed when it dies; completions recorded per character.
-3. **Field pickups:** potions and small chests, auto-loot, tuned per difficulty.
-4. **Talents:** the tree screen and points from completions; all 9 classes.
-5. **Gear and boss chests:** rarities, 5 slots, bags, keep-on-completion.
-6. **Difficulty depth:** Heroic/Mythic affixes and boss mechanics, Endless, raids.
-7. **Legendaries:** Thunderfury and Sulfuras first.
+3. **Records page:** the arcade top 10 per map with initials entry.
+4. **Field pickups:** potions and small chests, auto-loot, tuned per difficulty.
+5. **Talents:** the tree screen and points from completions; all 9 classes.
+6. **Gear and boss chests:** rarities, 5 slots, bags, keep-on-completion.
+7. **Difficulty depth:** Heroic/Mythic affixes and boss mechanics, Endless, raids.
+8. **Legendaries:** Thunderfury and Sulfuras first.

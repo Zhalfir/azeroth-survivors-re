@@ -807,6 +807,11 @@ pub(super) fn setup_hud(
                 OverLine,
                 centered(f, "", 18.0, Color::srgb(0.85, 0.78, 0.6)),
             ));
+            // The map-completion line (`super::characters`), empty on a loss.
+            root.spawn((
+                super::characters::CompletionLine,
+                centered(f, "", 17.0, GOLD),
+            ));
             // The run in numbers, one tile each.
             root.spawn(Node {
                 column_gap: Val::Px(12.0),
@@ -941,6 +946,7 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     };
     // The world goes to the battleground picked; until now it stood in the last one.
     selection.stage = selection.map;
+    data::set_difficulty(selection.difficulty);
     let next_guid = run.next_guid;
     *run = Run {
         class,
@@ -1093,7 +1099,10 @@ pub(super) fn keys(
 ) {
     match phase.get() {
         Phase::Menu => {
-            if keys.just_pressed(KeyCode::Enter) && start_run(&mut run, &mut selection) {
+            if keys.just_pressed(KeyCode::Enter)
+                && selection.character.is_some()
+                && start_run(&mut run, &mut selection)
+            {
                 next.set(Phase::Playing);
             }
         }

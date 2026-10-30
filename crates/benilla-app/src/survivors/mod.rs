@@ -7,6 +7,7 @@
 mod abilities;
 mod auto;
 mod cards;
+mod characters;
 mod data;
 mod enemies;
 mod fill;
@@ -45,7 +46,12 @@ impl Plugin for SurvivorsPlugin {
     fn build(&self, app: &mut App) {
         // Present before `OnEnter(InWorld)`, where the UI lifecycle decides not to load FrameXML.
         app.insert_resource(crate::run_mode::CaptureMode)
-            .add_plugins((grade::plugin, meter::plugin, settings::plugin))
+            .add_plugins((
+                grade::plugin,
+                meter::plugin,
+                settings::plugin,
+                characters::plugin,
+            ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -185,6 +191,10 @@ pub(super) struct Selection {
     pub stage: usize,
     /// Bumped on every change, so the menu rebuilds once.
     pub version: u32,
+    /// The difficulty picked at the menu, for the next run.
+    pub difficulty: data::Difficulty,
+    /// The saved character playing (`characters`); Enter World waits for one.
+    pub character: Option<u32>,
 }
 
 impl Selection {

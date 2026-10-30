@@ -733,7 +733,11 @@ pub(super) fn apply_hits(
                 boss: en.boss,
             });
             run.kills += 1;
-            if en.boss {
+            if en.final_boss {
+                // The map is won; `hero::hero_vitals` closes the run on its next frame.
+                run.won = true;
+                run.banner = Some((format!("{} is defeated!", en.def.name), 4.0));
+            } else if en.boss {
                 run.banner = Some((format!("{} is slain!", en.def.name), 3.0));
             }
         };

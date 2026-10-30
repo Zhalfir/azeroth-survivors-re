@@ -206,7 +206,7 @@ pub(super) fn drive(
                     for o in &mut run.abilities {
                         o.level = data::MAX_ABILITY_LEVEL;
                     }
-                    run.elapsed = data::VICTORY_SECS * 2.0 / 3.0;
+                    run.elapsed = data::run_secs() * 2.0 / 3.0;
                     run.bosses = 3;
                     run.rings = 4;
                 }

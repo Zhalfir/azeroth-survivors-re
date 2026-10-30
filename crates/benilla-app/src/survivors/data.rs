@@ -1305,16 +1305,98 @@ pub(crate) static BOSSES: &[EnemyDef] = &[
     },
 ];
 
-/// Survive this long to win.
-pub(crate) const VICTORY_SECS: f32 = 900.0;
-/// A boss every two and a quarter minutes, the last of six at 13:30, a fight before the bell.
-pub(crate) const BOSS_EVERY_SECS: f32 = 135.0;
+/// A map's difficulty: how long its run lasts before the final boss, and how hard its enemies
+/// hit (`docs/PROGRESSION.md`). Completing a map on one is a talent point.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub(crate) enum Difficulty {
+    #[default]
+    Normal,
+    Heroic,
+    Mythic,
+}
+
+impl Difficulty {
+    pub(crate) const ALL: [Difficulty; 3] =
+        [Difficulty::Normal, Difficulty::Heroic, Difficulty::Mythic];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Difficulty::Normal => "Normal",
+            Difficulty::Heroic => "Heroic",
+            Difficulty::Mythic => "Mythic",
+        }
+    }
+
+    /// The seconds to survive before the final boss comes.
+    pub(crate) fn run_secs(self) -> f32 {
+        match self {
+            Difficulty::Normal => 600.0,
+            Difficulty::Heroic => 900.0,
+            Difficulty::Mythic => 1200.0,
+        }
+    }
+
+    /// Enemy health, damage and crowd size against Normal's.
+    fn health(self) -> f32 {
+        match self {
+            Difficulty::Normal => 1.0,
+            Difficulty::Heroic => 1.7,
+            Difficulty::Mythic => 2.6,
+        }
+    }
+
+    fn damage(self) -> f32 {
+        match self {
+            Difficulty::Normal => 1.0,
+            Difficulty::Heroic => 1.4,
+            Difficulty::Mythic => 1.9,
+        }
+    }
+
+    fn crowd(self) -> f32 {
+        match self {
+            Difficulty::Normal => 1.0,
+            Difficulty::Heroic => 1.15,
+            Difficulty::Mythic => 1.3,
+        }
+    }
+
+    fn index(self) -> u8 {
+        self as u8
+    }
+}
+
+/// The difficulty of the run under way, set by `hud::start_run`. A global like the clock it
+/// scales, so the many curve functions below keep their one-argument shape.
+static DIFFICULTY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub(crate) fn set_difficulty(d: Difficulty) {
+    DIFFICULTY.store(d.index(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn difficulty() -> Difficulty {
+    Difficulty::ALL[usize::from(DIFFICULTY.load(std::sync::atomic::Ordering::Relaxed)).min(2)]
+}
+
+/// Survive this long and the final boss comes; kill it to win.
+pub(crate) fn run_secs() -> f32 {
+    difficulty().run_secs()
+}
+
+/// The regular bosses arrive every 15 % of the run, five before the final one.
+pub(crate) fn boss_every() -> f32 {
+    run_secs() * 0.15
+}
+
+/// The final boss's health against its regular self.
+pub(crate) const FINAL_BOSS_HEALTH: f32 = 3.0;
 /// Experience per gem: every level of the curve comes at the run's pace.
 pub(crate) const XP_RATE: f32 = 2.0;
 
-/// How far through the run, 0 at the start and 1 at [`VICTORY_SECS`].
+/// How far through the run, 0 at the start and 1 at [`run_secs`]; past 1 while the final boss
+/// stands, so the pressure keeps rising.
 pub(crate) fn progress(elapsed: f32) -> f32 {
-    (elapsed / VICTORY_SECS).max(0.0)
+    (elapsed / run_secs()).max(0.0)
 }
 
 /// The pool of roster indices at a point in the run, from a roster `tiers` long.
@@ -1329,17 +1411,18 @@ pub(crate) fn wave_pool(elapsed: f32, tiers: usize) -> [usize; 3] {
 
 /// How many enemies the spawner keeps alive at a point in the run.
 pub(crate) fn target_alive(elapsed: f32) -> usize {
-    ((14.0 + progress(elapsed) * 225.0) as usize).min(220)
+    // The cap holds on every difficulty: past it a phone's frame time, not the fight, suffers.
+    (((14.0 + progress(elapsed) * 225.0) * difficulty().crowd()) as usize).min(220)
 }
 
 /// Enemy health grows on top of the tiers, so a late kill takes several spells.
 pub(crate) fn hp_scale(elapsed: f32) -> f32 {
-    1.0 + progress(elapsed) * 0.75
+    (1.0 + progress(elapsed) * 0.75) * difficulty().health()
 }
 
 /// Enemy damage grows the same way.
 pub(crate) fn damage_scale(elapsed: f32) -> f32 {
-    1.0 + progress(elapsed) * 0.9
+    (1.0 + progress(elapsed) * 0.9) * difficulty().damage()
 }
 
 /// The experience to go from `level` to the next: Vampire Survivors' curve, cheap early.
@@ -1400,7 +1483,7 @@ pub(crate) struct MapDef {
     pub victory: &'static str,
     /// Weakest first; empty for The Barrens, which keeps its hand-tuned [`ENEMIES`].
     foes: &'static [Foe],
-    /// One every [`BOSS_EVERY_SECS`], in order; empty for The Barrens' [`BOSSES`].
+    /// One every [`boss_every`], in order, the last the final boss; empty for The Barrens' [`BOSSES`].
     bosses: &'static [Foe],
 }
 

@@ -58,6 +58,15 @@ pub(super) struct RaceFace(u8);
 #[derive(Component)]
 pub(super) struct PickName;
 
+/// The race, gender and class tower: shown to create a character, hidden on character select
+/// (`super::characters`).
+#[derive(Component)]
+pub(super) struct TowerRoot;
+
+/// Enter World's holder: shown on character select, hidden while creating.
+#[derive(Component)]
+pub(super) struct EnterSlot;
+
 /// The saved pick, `benilla-config/survivors-pick.txt` (`localStorage` on the page):
 /// `class race sex map`, restored at the menu so a reload keeps the last hero and zone.
 fn pick_path() -> Option<std::path::PathBuf> {
@@ -113,20 +122,20 @@ pub(super) fn restore_pick(
 }
 
 /// Every class's looks, `(display, race, sex)`, indexed like [`data::CLASSES`].
-fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
+pub(super) fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
     data::CLASSES
         .iter()
         .map(|c| looks_for(c, creatures))
         .collect()
 }
 
-fn find(looks: &[(u32, u8, u8)], race: Option<u8>, sex: Option<u8>) -> Option<usize> {
+pub(super) fn find(looks: &[(u32, u8, u8)], race: Option<u8>, sex: Option<u8>) -> Option<usize> {
     looks
         .iter()
         .position(|&(_, r, s)| race.is_none_or(|x| x == r) && sex.is_none_or(|x| x == s))
 }
 
-fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usize) {
+pub(super) fn set(sel: &mut Selection, all: &[Vec<(u32, u8, u8)>], class: usize, look: usize) {
     sel.class = Some(class);
     sel.looks = all[class].clone();
     sel.look = Some(look);
@@ -184,13 +193,16 @@ pub(super) fn build_menu(
             );
         });
         // `CharSelectEnterWorldButton`, 200×60 at BOTTOM (0,30).
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(30.0),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
+        ui.spawn((
+            EnterSlot,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(30.0),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|c| {
             glue_button(
                 c,
@@ -211,14 +223,17 @@ pub(super) fn build_menu(
 /// faction banners, the gender pair, the class grid, the class text and Randomize.
 fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
     let px = Val::Px;
-    ui.spawn(Node {
-        position_type: PositionType::Absolute,
-        left: px(28.0),
-        top: px(74.0),
-        width: px(206.0),
-        height: px(TOWER_H),
-        ..default()
-    })
+    ui.spawn((
+        TowerRoot,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(28.0),
+            top: px(74.0),
+            width: px(206.0),
+            height: px(TOWER_H),
+            ..default()
+        },
+    ))
     .with_children(|tower| {
         if let Some(bg) = &art.tower_bg {
             tower.spawn((
@@ -556,7 +571,7 @@ pub(super) fn menu_clicks(
             }
         }
         MenuAction::Enter => {
-            if start_run(&mut run, &mut selection) {
+            if selection.character.is_some() && start_run(&mut run, &mut selection) {
                 next.set(Phase::Playing);
             }
         }

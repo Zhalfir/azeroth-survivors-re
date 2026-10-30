@@ -477,8 +477,7 @@ pub(super) fn hero_vitals(
         units::kill_unit(&mut store);
         marks.clear();
         marks.flush(entity, guid.0, &mut store, &mut fields);
-    } else if run.elapsed >= data::VICTORY_SECS {
-        run.won = true;
+    } else if run.won {
         // A last flourish before the results.
         fx.cast(entity, 642, &[entity], None);
         next.set(Phase::GameOver);
