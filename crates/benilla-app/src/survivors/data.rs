@@ -1452,7 +1452,16 @@ pub(crate) fn target_alive(elapsed: f32) -> usize {
 
 /// Enemy health grows on top of the tiers, so a late kill takes several spells.
 pub(crate) fn hp_scale(elapsed: f32) -> f32 {
-    (1.0 + progress(elapsed) * 0.75) * difficulty().health()
+    (1.0 + progress(elapsed) * 0.75) * ramped(difficulty().health(), elapsed)
+}
+
+/// A difficulty's multiplier eased in: 35% of its step over Normal at the start, the whole step
+/// from half time. Applied in full from the first second, Mythic's ×3.8 health killed a level-9
+/// Priest at 3:09 and a level-7 Hunter at 0:58 while the Warrior and Mage still reached the final
+/// boss: a wall at the start, not a test at the end (balance round 8, 2026-10-31).
+fn ramped(multiplier: f32, elapsed: f32) -> f32 {
+    let ramp = 0.35 + 0.65 * (progress(elapsed) / 0.5).min(1.0);
+    1.0 + (multiplier - 1.0) * ramp
 }
 
 /// Enemy damage grows the same way.
@@ -1460,7 +1469,7 @@ pub(crate) fn damage_scale(elapsed: f32) -> f32 {
     // ×1.35 at the bell on Normal (×1.9 at first, ×1.6 in round 2): late, a dozen horde blows of
     // 40-60 took a 590-health Hunter from full to dead in two seconds (rounds 1-3, 2026-10-31).
     // Heroic and Mythic keep their own multipliers on top.
-    (1.0 + progress(elapsed) * 0.35) * difficulty().damage()
+    (1.0 + progress(elapsed) * 0.35) * ramped(difficulty().damage(), elapsed)
 }
 
 /// The experience to go from `level` to the next: Vampire Survivors' curve, cheap early.

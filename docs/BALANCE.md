@@ -190,3 +190,38 @@ Three of four. The auto-player plays below a decent person, so Heroic's *first* 
 easy side of "about half of Normal's clearers". The zones' rosters climb with their level ranges
 (Elwynn 1-10 … Naxxramas 53-61), so a later zone is the real read; if the middle of the Heroic
 pass is still this kind, Heroic's multipliers go up.
+
+## Round 7 — Mythic, 34 talent points + T2 (Elwynn Forest, stopped after 2 classes)
+
+The power a full Heroic clear gives: on paper ×1.87 damage and ×1.40 health, +3 armour and
++0.6 regeneration, against Mythic's ×2.6 enemy health, ×1.9 damage, ×1.3 crowd and a 20-minute
+run.
+
+| Class | Result | Level | Final boss |
+|---|---|---|---|
+| Warrior | **Victory, 22:25** | 169 | 182k health, down in 2:25 |
+| Mage | **Victory, 22:56** | 179 | down in 2:56 |
+
+Two of two, both with the final boss down in under three minutes: Mythic was not an achievement.
+The run's own growth (levels, cards, health per level, regeneration) multiplies with the talents'
+and the tier's, so the paper ratio understates the hero. Frame data from the Warrior run: worst
+frame per second median 30 ms, p99 58 ms, max 72 ms, no second with a frame over 100 ms (the
+pipeline cache removed the hitches).
+
+Changes (round 8 measures them): enemy health / damage / crowd
+- Heroic ×2.1 / ×1.6 / ×1.2 (was ×1.7 / ×1.4 / ×1.15)
+- Mythic ×3.8 / ×2.5 / ×1.4 (was ×2.6 / ×1.9 / ×1.3)
+
+## Round 8 — the steeper Mythic (Elwynn Forest)
+
+| Class | Result |
+|---|---|
+| Warrior | alive at the batch's 26-minute cap: final boss 9% of 266k, the hero at 1,359/1,435 |
+| Mage | alive at the cap: final boss 15%, the hero at 1,332/1,799 |
+| Priest | died at 3:09, level 9 (159 kills: too slow to level against ×3.8 health) |
+| Hunter | died at 0:58, level 7 |
+
+The end was right (a four-to-five-minute final boss, won narrowly by the two strongest kits);
+the start was a wall. Change: Heroic's and Mythic's health and damage steps ease in, 35% of the
+step at the start and all of it from half time (Mythic starts at ×1.98 health and ×1.53 damage).
+The final boss keeps the full step. The batch cap is now 30 minutes a run.
