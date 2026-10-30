@@ -630,11 +630,14 @@ pub(crate) static ABILITIES: &[AbilityDef] = &[
         }
     ),
     // --- Shaman ---
+    // The weakest class in balance rounds 1-4 (dead at 0:50, 1:45, 2:22, 3:10): little area and
+    // one slow on a 3 s cooldown. Frost Shock now slows two, Chain Lightning jumps once more,
+    // Lightning Bolt hits a little harder.
     ability!(
         "lightning_bolt",
         403,
         Bolt {
-            damage: 15.0,
+            damage: 17.0,
             cooldown: 1.3,
             range: 24.0
         }
@@ -647,7 +650,7 @@ pub(crate) static ABILITIES: &[AbilityDef] = &[
             cooldown: 3.0,
             range: 20.0,
             radius: 9.0,
-            count: 3
+            count: 4
         }
     ),
     ability!(
@@ -678,6 +681,7 @@ pub(crate) static ABILITIES: &[AbilityDef] = &[
             damage: 16.0,
             cooldown: 3.0,
             range: 20.0,
+            count: 2,
             effect: Effect::Slow(0.5, 4.0)
         }
     ),
@@ -1392,9 +1396,16 @@ pub(crate) fn run_secs() -> f32 {
     difficulty().run_secs()
 }
 
-/// The regular bosses arrive every 15 % of the run, five before the final one.
+/// The regular bosses arrive every 15 % of the run after [`boss_offset`], five before the final
+/// one: on Normal at 2:00, 3:30, 5:00, 6:30 and 8:00.
 pub(crate) fn boss_every() -> f32 {
     run_secs() * 0.15
+}
+
+/// The schedule's delay: the first boss at 20 % of the run, not 15 %. At 1:30 on Normal, Mother
+/// Fang and her pack were a wall a level-13 Hunter could not pass (balance round 4).
+pub(crate) fn boss_offset() -> f32 {
+    run_secs() * 0.05
 }
 
 /// The final boss's health against its regular self. ×3 (105k in Elwynn) took a level-121 Mage

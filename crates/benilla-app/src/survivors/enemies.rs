@@ -210,7 +210,8 @@ pub(super) fn spawn_enemies(
 
     // The roster's bosses but the last on the clock; the last is the final boss, at the bell.
     let regulars = roster.bosses.len().saturating_sub(1) as u32;
-    let due_bosses = ((elapsed / data::boss_every()) as u32).min(regulars);
+    let scheduled = (elapsed - data::boss_offset()).max(0.0);
+    let due_bosses = ((scheduled / data::boss_every()) as u32).min(regulars);
     let final_due = elapsed >= data::run_secs() && !roster.bosses.is_empty();
     while run.bosses < due_bosses || (final_due && run.bosses == regulars) {
         let is_final = run.bosses == regulars;
@@ -239,7 +240,7 @@ pub(super) fn spawn_enemies(
     }
 
     // Half way between bosses, a closing ring of the moment's weakest.
-    let due_rings = ((elapsed + data::boss_every() / 2.0) / data::boss_every()) as u32;
+    let due_rings = ((scheduled + data::boss_every() / 2.0) / data::boss_every()) as u32;
     // No ring once the final boss stands: the climax is the boss. A ring adds to the horde at
     // most up to the cap plus a margin; at 220 alive a ring of 93 after the bell killed a full
     // 510-health Priest in one second (balance round 2, 2026-10-31).
