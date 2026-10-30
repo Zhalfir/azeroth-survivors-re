@@ -13,8 +13,9 @@
 //! - `build` — every ability and passive with its rank, on each change (`items`: none yet);
 //! - `boss_hit` — each blow a boss lands on the hero: who, how much, health before;
 //! - `tick` — every second of run time: hero health, level, XP gained, enemies alive, frames per
-//!   second, and per spell its damage, hits, crits and casts; per enemy type the damage it dealt
-//!   the hero (and how many blows), its kills and its spawns;
+//!   second and the second's longest frame (`max_frame_ms`, which an average hides), and per
+//!   spell its damage, hits, crits and casts; per enemy type the damage it dealt the hero (and
+//!   how many blows), its kills and its spawns;
 //! - `end` — won or lost, the killing blow, the totals.
 //!
 //! Single hits are folded into the second's tick: late in a run they come by the thousand a
@@ -321,12 +322,13 @@ fn flush_run() {
 fn tick(
     run: Res<Run>,
     time: Res<Time<Real>>,
-    mut state: Local<(f32, u32, f32)>,
+    mut state: Local<(f32, u32, f32, f32)>,
     enemies: Query<&Enemy>,
     spells: Option<Res<crate::ui_action::Spells>>,
 ) {
-    let (next_at, frames, since) = &mut *state;
+    let (next_at, frames, since, worst) = &mut *state;
     *frames += 1;
+    *worst = worst.max(time.delta_secs() * 1000.0);
     if run.elapsed < *next_at {
         if run.elapsed + 1.0 < *next_at {
             *next_at = 0.0; // a new run started
@@ -342,6 +344,7 @@ fn tick(
     *next_at = run.elapsed.floor() + 1.0;
     *frames = 0;
     *since = now;
+    let max_frame_ms = std::mem::take(worst);
     let Ok(mut t) = TICK.lock() else { return };
     let spell_json: Vec<String> = t
         .spells
@@ -372,7 +375,7 @@ fn tick(
     };
     let alive = enemies.iter().filter(|e| !e.dead).count();
     let line = format!(
-        "{{\"t\":{:.0},\"type\":\"tick\",\"hp\":{:.0},\"max_hp\":{:.0},\"level\":{},\"xp_gained\":{:.1},\"kills_total\":{},\"alive\":{alive},\"fps\":{fps:.0},\"spells\":{{{}}},\"taken\":{{{}}},\"kills\":{{{}}},\"spawns\":{{{}}}}}",
+        "{{\"t\":{:.0},\"type\":\"tick\",\"hp\":{:.0},\"max_hp\":{:.0},\"level\":{},\"xp_gained\":{:.1},\"kills_total\":{},\"alive\":{alive},\"fps\":{fps:.0},\"max_frame_ms\":{max_frame_ms:.0},\"spells\":{{{}}},\"taken\":{{{}}},\"kills\":{{{}}},\"spawns\":{{{}}}}}",
         run.elapsed,
         run.hp,
         run.stats().max_hp,
