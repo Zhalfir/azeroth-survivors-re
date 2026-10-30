@@ -335,6 +335,7 @@ fn tick(
     if run.elapsed < *next_at {
         if run.elapsed + 1.0 < *next_at {
             *next_at = 0.0; // a new run started
+            samples.take(); // not the last run's partial second
         }
         return;
     }

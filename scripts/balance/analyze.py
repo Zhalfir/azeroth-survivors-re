@@ -53,7 +53,7 @@ def main():
     for c, rs in sorted(by.items()):
         surv = [r["t"] for r in rs]
         med = lambda k: st.median([r["level_at"].get(k, 9999) for r in rs])
-        print(f"{c:8} {len(rs):4} {sum(r['won'] for r in rs):3} {st.median(surv):8.0f} {max(surv):8.0f} {st.median([r['level'] for r in rs]):4.0f} {st.median([r['kills'] for r in rs]):6.0f} {med(5):5.0f} {med(10):5.0f} {st.median([r['fps_p50'] for r in rs]):5.0f} {st.median([r['fps_p10'] for r in rs]):5.0f}  {rs[0]['top']} | {[r['blow']['from'] if r['blow'] else 'won' for r in rs]}")
+        print(f"{c:8} {len(rs):4} {sum(r['won'] for r in rs):3} {st.median(surv):8.0f} {max(surv):8.0f} {st.median([r['level'] for r in rs]):4.0f} {st.median([r['kills'] for r in rs]):6.0f} {med(5):5.0f} {med(10):5.0f} {st.median([r['fps_p50'] for r in rs]):5.0f} {st.median([r['fps_p10'] for r in rs]):5.0f} {ms([r['cpu_p50'] for r in rs]):>5} {ms([r['gpu_p50'] for r in rs]):>5}  {rs[0]['top']} | {[r['blow']['from'] if r['blow'] else 'won' for r in rs]}")
     if "-v" in os.environ.get("ANALYZE", ""):
         for r in rows: print(r)
 
