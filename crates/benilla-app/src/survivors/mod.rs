@@ -11,6 +11,8 @@ mod data;
 mod enemies;
 mod fill;
 mod grade;
+#[cfg(target_os = "android")]
+mod graphics;
 mod hero;
 mod hud;
 mod menu;
@@ -139,7 +141,7 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::GameOver), unpause)
             .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
         #[cfg(target_os = "android")]
-        app.add_plugins(touch::plugin);
+        app.add_plugins((touch::plugin, graphics::plugin));
         if let Some(auto) = auto::from_env() {
             app.insert_resource(auto)
                 .add_systems(

@@ -17,11 +17,6 @@ use std::path::Path;
 use benilla_app::BuildId;
 use bevy::android::ANDROID_APP;
 
-/// The long side the 3D world renders at by default: Full HD. A tablet's native 2960 px is
-/// 2.4× the pixels for a picture the eye barely tells apart, and the world is GPU-bound. The UI
-/// stays native. `WOW_RENDER_SCALE` in `android-env.txt` overrides it.
-const WORLD_LONG_SIDE: f32 = 1920.0;
-
 #[bevy::prelude::bevy_main]
 fn main() {
     if let Some(app) = ANDROID_APP.get() {
@@ -38,17 +33,6 @@ fn main() {
                 std::env::set_var("BENILLA_HOME", files.join("benilla-config"));
             }
             load_env_file(&files.join("android-env.txt"));
-        }
-        if std::env::var_os("WOW_RENDER_SCALE").is_none() {
-            let config = app.config();
-            let long_dp = config.screen_width_dp().max(config.screen_height_dp());
-            if let (Some(dp), Some(dpi)) = (long_dp, config.density()) {
-                let long_px = dp as f32 * dpi as f32 / 160.0;
-                if long_px > WORLD_LONG_SIDE {
-                    let scale = WORLD_LONG_SIDE / long_px;
-                    unsafe { std::env::set_var("WOW_RENDER_SCALE", format!("{scale:.3}")) };
-                }
-            }
         }
     }
     let _ = benilla_app::run_survivors(BuildId {

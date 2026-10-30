@@ -164,6 +164,9 @@ pub(super) enum UiAction {
     Resume,
     MainMenu,
     Quit,
+    /// Cycles the graphics preset (Android; `super::graphics`).
+    #[cfg(target_os = "android")]
+    Graphics,
 }
 
 /// The colour a button returns to when not hovered.
@@ -672,25 +675,23 @@ pub(super) fn setup_hud(
                     ),
                     ..default()
                 },
-                BackgroundGradient(vec![
-                    Gradient::Conic(ConicGradient::new(
-                        UiPosition::CENTER,
-                        (0..24)
-                            .map(|i| {
-                                let a = i as f32 / 24.0 * std::f32::consts::TAU;
-                                let on = i % 2 == 0;
-                                AngularColorStop::new(
-                                    if on {
-                                        Color::srgba(1.0, 0.8, 0.3, 0.07)
-                                    } else {
-                                        Color::srgba(1.0, 0.8, 0.3, 0.0)
-                                    },
-                                    a,
-                                )
-                            })
-                            .collect(),
-                    )),
-                ]),
+                BackgroundGradient(vec![Gradient::Conic(ConicGradient::new(
+                    UiPosition::CENTER,
+                    (0..24)
+                        .map(|i| {
+                            let a = i as f32 / 24.0 * std::f32::consts::TAU;
+                            let on = i % 2 == 0;
+                            AngularColorStop::new(
+                                if on {
+                                    Color::srgba(1.0, 0.8, 0.3, 0.07)
+                                } else {
+                                    Color::srgba(1.0, 0.8, 0.3, 0.0)
+                                },
+                                a,
+                            )
+                        })
+                        .collect(),
+                ))]),
                 UiTransform::default(),
                 bevy::ui::FocusPolicy::Pass,
             ));
@@ -752,6 +753,24 @@ pub(super) fn setup_hud(
                     b.spawn(text(f, label, 20.0, Color::WHITE));
                 });
             }
+            #[cfg(target_os = "android")]
+            root.spawn((
+                button(UiAction::Graphics, BUTTON),
+                Node {
+                    width: Val::Px(240.0),
+                    justify_content: JustifyContent::Center,
+                    padding: UiRect::axes(Val::Px(20.0), Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+            ))
+            .with_children(|b| {
+                b.spawn((
+                    text(f, super::graphics::label(default()), 20.0, Color::WHITE),
+                    super::graphics::GraphicsLabel,
+                ));
+            });
         });
 
     // --- Results. ---
