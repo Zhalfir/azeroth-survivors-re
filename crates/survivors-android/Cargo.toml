@@ -1,0 +1,27 @@
+[package]
+name = "survivors-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Warcraft Survivors as an Android NativeActivity: the survivors launcher, with the data and state folders pointed into the app's storage"
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+test = false
+
+[features]
+default = []
+dev = ["benilla-app/dev"]
+
+[dependencies]
+benilla-app = { path = "../benilla-app", default-features = false }
+
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { workspace = true, features = ["android-native-activity"] }
+
+[build-dependencies]
+benilla-buildstamp = { path = "../benilla-buildstamp" }

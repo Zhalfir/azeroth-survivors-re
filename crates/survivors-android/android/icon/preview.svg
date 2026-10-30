@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 432 432">
+  <defs><clipPath id="sq"><rect x="36" y="36" width="360" height="360" rx="110"/></clipPath></defs>
+  <g clip-path="url(#sq)"><image href="background.svg" width="432" height="432"/><image href="foreground.svg" width="432" height="432"/></g>
+</svg>

@@ -22,7 +22,19 @@ anyhow = "1.0.102"
 # plugin that takes bevy with its default features brings the audio stack back too.
 bevy = { version = "0.18.1", default-features = false, features = [
     "default_app",
-    "default_platform",
+    # `default_platform` spelled out without `android-game-activity`: the Android build
+    # (`crates/survivors-android`) runs on NativeActivity, which needs no Java, and the two
+    # activity backends cannot both be on.
+    "std",
+    "android_shared_stdcxx",
+    "bevy_gilrs",
+    "bevy_winit",
+    "default_font",
+    "multi_threaded",
+    "webgl2",
+    "x11",
+    "wayland",
+    "sysinfo_plugin",
     "2d_bevy_render",
     "3d_bevy_render",
     "ui_api",

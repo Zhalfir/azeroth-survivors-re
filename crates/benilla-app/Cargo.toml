@@ -80,7 +80,8 @@ rand = "0.8"
 
 # The EditBox clipboard, on the main thread as NSPasteboard requires; bevy_egui's 3.x. Native-only:
 # arboard has no wasm32 backend (`textinput/clipboard.rs` falls back to no pasteboard there).
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Nor an Android one: NativeActivity has no clipboard seam either, and the same fallback applies.
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
 arboard = "3"
 
 # Wayland clipboard over the standard `wl_data_device`; arboard's speaks `wlr-data-control`,

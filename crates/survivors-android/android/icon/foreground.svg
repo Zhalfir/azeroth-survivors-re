@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="432" height="432" viewBox="0 0 432 432">
+  <defs>
+    <linearGradient id="steel" x1="0" x2="1">
+      <stop offset="0" stop-color="#8a97a8"/>
+      <stop offset="0.48" stop-color="#f4f8ff"/>
+      <stop offset="0.52" stop-color="#b9c4d4"/>
+      <stop offset="1" stop-color="#5d6878"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff1b0"/>
+      <stop offset="0.45" stop-color="#e8b23a"/>
+      <stop offset="1" stop-color="#8a5a12"/>
+    </linearGradient>
+    <linearGradient id="grip" x1="0" x2="1">
+      <stop offset="0" stop-color="#3a1f12"/>
+      <stop offset="0.5" stop-color="#6e3d22"/>
+      <stop offset="1" stop-color="#2a150b"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
+    <!-- One sword pointing up, hilt at the bottom, centred on (0,0). -->
+    <g id="sword" filter="url(#shadow)">
+      <path d="M0 -118 L11 -96 L11 40 L0 50 L-11 40 L-11 -96 Z" fill="url(#steel)" stroke="#2b3240" stroke-width="2"/>
+      <path d="M0 -112 L0 44" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.5"/>
+      <path d="M-38 44 Q-20 36 0 40 Q20 36 38 44 L40 54 Q20 50 0 54 Q-20 50 -40 54 Z" fill="url(#gold)" stroke="#4a2e08" stroke-width="2"/>
+      <circle cx="-41" cy="49" r="6" fill="url(#gold)" stroke="#4a2e08" stroke-width="2"/>
+      <circle cx="41" cy="49" r="6" fill="url(#gold)" stroke="#4a2e08" stroke-width="2"/>
+      <rect x="-6.5" y="54" width="13" height="38" rx="3" fill="url(#grip)" stroke="#1a0c05" stroke-width="2"/>
+      <path d="M-6 62 L6 66 M-6 72 L6 76 M-6 82 L6 86" stroke="#c9913a" stroke-width="2"/>
+      <circle cx="0" cy="99" r="10" fill="url(#gold)" stroke="#4a2e08" stroke-width="2"/>
+      <circle cx="0" cy="99" r="4" fill="#3cff6a"/>
+    </g>
+  </defs>
+  <!-- the rune ring -->
+  <circle cx="216" cy="216" r="128" fill="none" stroke="#3cff6a" stroke-width="7" filter="url(#glow)" opacity="0.95"/>
+  <circle cx="216" cy="216" r="117" fill="none" stroke="url(#gold)" stroke-width="3"/>
+  <circle cx="216" cy="216" r="139" fill="none" stroke="url(#gold)" stroke-width="2.5"/>
+  <g fill="url(#gold)" stroke="#4a2e08" stroke-width="1.5">
+    <path d="M216 72 l8 11 l-8 11 l-8 -11 Z"/>
+    <path d="M216 338 l8 11 l-8 11 l-8 -11 Z"/>
+    <path d="M72 216 l11 -8 l11 8 l-11 8 Z"/>
+    <path d="M338 216 l11 -8 l11 8 l-11 8 Z"/>
+  </g>
+  <use href="#sword" transform="translate(216 220) rotate(-42) translate(0 22) scale(0.92)"/>
+  <use href="#sword" transform="translate(216 220) rotate(42) translate(0 22) scale(0.92)"/>
+  <!-- a gem where the blades cross -->
+  <circle cx="216" cy="203" r="11" fill="#3cff6a" filter="url(#glow)"/>
+  <circle cx="213" cy="200" r="3.5" fill="#e9ffe9"/>
+</svg>

@@ -52,3 +52,7 @@ __pycache__/
 # The C sysroot for the wasm Lua build — fetched by scripts/web-setup.sh, ~300 MB
 /tools/wasi-sdk/
 /tools/binaryen/
+
+# Android build output (crates/survivors-android/android/build-apk.sh)
+/azeroth-survivors.apk
+/azeroth-survivors.apk.idsig
