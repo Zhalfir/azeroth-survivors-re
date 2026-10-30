@@ -134,3 +134,41 @@ Mythic keep their multipliers on top).
   and profile what costs most per enemy.
 - **The first card screen** stalled (2 fps for a second): the survivors UI's pipelines (cards,
   gradients, shadows) are not in the warm pass. To check with the cache in place.
+
+## Round 4 (stopped after 4 classes)
+
+Druid 3:48 → 8:18 (four bosses; late horde blows now ~34, were 40-60). The squishy classes still
+fell to the **first boss and its pack at 1:30** on Normal: Hunter 1:46 (150 → 3 health in six
+seconds), Priest 1:59. Shaman 3:10: little area, one slow on a 3 s cooldown, kills slow, levels slow
+(level 5 at 0:37, others 0:18-0:25), and spirals.
+
+Changes: the first regular boss at 20% of the run (2:00 on Normal), then every 15% (3:30, 5:00,
+6:30, 8:00); rings shifted with it (first ring 1:15). Shaman: Frost Shock slows two targets,
+Chain Lightning jumps to four, Lightning Bolt 17 (was 15).
+
+Note: one run per class is noisy (the Hunter lived 8:51 in round 3 and 1:46 in round 4 with
+nearly the same build); trends across rounds are what to read.
+
+## Round 5 — the first Normal victory
+
+| Class | Round 1 | Round 5 |
+|---|---|---|
+| Priest | 0:51 | **Victory, 12:48** (final boss 70k, ~2:50 fight, the hero down to 327/450 and back) |
+| Rogue | 5:20 | reached the final boss; alive at 16:10, the boss only 21% down |
+| Druid | 0:52 | reached the final boss; died at 12:35, level 159 |
+| Warlock | 6:24 | reached the final boss; died at 10:17 |
+| Hunter | 0:52 | 6:22, three bosses |
+| Shaman | 0:50 | 6:11, two bosses |
+
+Findings:
+
+1. **The horde walls the final boss off.** Topped up to 220 through the fight, it kept a melee
+   Rogue from the boss for six minutes; ranged spells that pick the nearest target hit the wall.
+2. **The 6:00 tier** (Kobold Miners 25 a blow, Murloc Streamrunners 34) met heroes of 210-290.
+3. **Frame-time hitches** (7-11 fps for single seconds, with only ~120 alive) coincided with the
+   blows that killed the Hunter: hitches, not a steady low rate. Pipelines no longer compile live,
+   so something else: first loads of new creature models (the Murlocs arrived then), or UI
+   rebuilds (the live meter rebuilt its texts twice a second).
+
+Changes: while the final boss stands, the horde refills only to a third of the cap; health per
+level 2.5 (was 1.5); the live meter updates in place.
