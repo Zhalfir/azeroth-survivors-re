@@ -78,7 +78,8 @@ fn lines(run: &Run, spells: Option<&crate::ui_action::Spells>) -> Vec<Line> {
                 None if r.source == 0 => "Other".to_string(),
                 None => spell_name(spells, r.source, "Other"),
             };
-            let secs = f64::from((run.elapsed - r.since).max(1.0));
+            // At least five seconds, so an ability's first burst does not read as its pace.
+            let secs = f64::from((run.elapsed - r.since).max(5.0));
             Line {
                 source: r.source,
                 name,
@@ -111,7 +112,10 @@ fn label(font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) -> 
             ..default()
         },
         TextColor(color),
-        TextShadow::default(),
+        TextShadow {
+            offset: Vec2::splat(1.0),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.85),
+        },
         Pickable::IGNORE,
     )
 }

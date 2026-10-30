@@ -143,7 +143,7 @@ impl Plugin for SurvivorsPlugin {
                     .chain()
                     .after(hud::show_panels),
             )
-            .add_systems(OnEnter(Phase::Playing), unpause)
+            .add_systems(OnEnter(Phase::Playing), (unpause, grace))
             .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
             .add_systems(OnEnter(Phase::Paused), pause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
@@ -439,6 +439,15 @@ fn pause(mut time: ResMut<Time<Virtual>>) {
 
 fn unpause(mut time: ResMut<Time<Virtual>>) {
     time.unpause();
+}
+
+/// Back in play after a card, the pause menu or the start, the hero is immune for a moment (the
+/// Divine Shield bubble shows it): on a tablet the thumb has to travel from the card or button
+/// back to the joystick.
+const GRACE_SECS: f32 = 1.0;
+
+fn grace(mut run: ResMut<Run>) {
+    run.immune_t = run.immune_t.max(GRACE_SECS);
 }
 
 /// Back at the menu: everything the last run spawned goes, and the run starts over.

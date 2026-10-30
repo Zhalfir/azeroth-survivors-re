@@ -413,8 +413,9 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
 
 /// The zone list in `CharacterSelectCharacterFrame` (260×642 at TOPRIGHT (-5,-15)), one
 /// character-row per zone, lowest level first.
-fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
-    let px = Val::Px;
+/// The zones as the list shows them, easiest first: `(map, lowest level, highest level)`. It is
+/// also the order they unlock in (`super::characters`).
+pub(super) fn zone_order() -> Vec<(usize, u32, u32)> {
     let mut order: Vec<(usize, u32, u32)> = (0..data::MAPS.len())
         .map(|i| {
             let levels = data::roster(i).enemies.iter().map(|e| e.level);
@@ -424,6 +425,12 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
         })
         .collect();
     order.sort_by_key(|&(i, lo, _)| (lo, data::MAPS[i].name));
+    order
+}
+
+fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
+    let px = Val::Px;
+    let order = zone_order();
 
     ui.spawn(Node {
         position_type: PositionType::Absolute,
@@ -543,6 +550,7 @@ pub(super) fn menu_clicks(
     mut run: ResMut<Run>,
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
+    unlocks: Res<super::characters::Unlocks>,
 ) {
     if *phase.get() != Phase::Menu {
         return;
@@ -564,6 +572,8 @@ pub(super) fn menu_clicks(
         .map(|&(_, r, s)| (r, s));
     let (race, sex) = (cur.map(|c| c.0), cur.map_or(0, |c| c.1));
     match action {
+        // A locked zone (`super::characters::Unlocks`) takes no pick.
+        MenuAction::Map(i) if !unlocks.zone(i) => {}
         MenuAction::Map(i) => {
             if selection.map != i {
                 selection.map = i;

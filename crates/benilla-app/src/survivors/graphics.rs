@@ -79,12 +79,13 @@ impl Preset {
     }
 }
 
-/// The preset in force, and whether it still has to be applied (at start, until the window has
-/// a size).
+/// The preset in force, and the window's long side it was last applied for: the preset is
+/// applied again whenever that changes. On Android the window starts at a 1600×900 placeholder
+/// before the screen's real size arrives, and a scale worked out then would stay at 1.
 #[derive(Resource)]
 pub(super) struct Graphics {
     pub(super) preset: Preset,
-    applied: bool,
+    applied_for: Option<u32>,
 }
 
 /// The pause-menu button's label.
@@ -106,7 +107,7 @@ pub(super) fn plugin(app: &mut App) {
         .unwrap_or_default();
     app.insert_resource(Graphics {
         preset,
-        applied: false,
+        applied_for: None,
     })
     .add_systems(Update, (cycle_preset, apply_preset).chain());
 }
@@ -118,7 +119,7 @@ fn cycle_preset(
     for (interaction, action) in &presses {
         if *interaction == Interaction::Pressed && *action == UiAction::Graphics {
             graphics.preset = graphics.preset.next();
-            graphics.applied = false;
+            graphics.applied_for = None;
             if let Some(path) = preset_path() {
                 let _ = crate::local_state::write_atomic(&path, graphics.preset.name());
             }
@@ -132,16 +133,14 @@ fn apply_preset(
     cvars: Option<ResMut<Cvars>>,
     mut labels: Query<&mut Text, With<GraphicsLabel>>,
 ) {
-    if graphics.applied {
-        return;
-    }
     let (Some(mut cvars), Ok(window)) = (cvars, windows.single()) else {
         return;
     };
-    let long = window.physical_width().max(window.physical_height()) as f32;
-    if long <= 0.0 {
+    let long_px = window.physical_width().max(window.physical_height());
+    if long_px == 0 || graphics.applied_for == Some(long_px) {
         return;
     }
+    let long = long_px as f32;
     let preset = graphics.preset;
     if std::env::var_os("WOW_RENDER_SCALE").is_none() {
         let scale = (preset.world_long_side() / long).min(1.0);
@@ -154,9 +153,9 @@ fn apply_preset(
         text.0 = label(preset);
     }
     info!(
-        "graphics: preset {} ({}px world)",
+        "graphics: preset {} ({}px world on a {long_px}px screen)",
         preset.name(),
         preset.world_long_side()
     );
-    graphics.applied = true;
+    graphics.applied_for = Some(long_px);
 }

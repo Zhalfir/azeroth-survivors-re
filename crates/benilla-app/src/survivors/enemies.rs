@@ -512,7 +512,10 @@ pub(super) fn collect_gems(
         run.pending_levels += 1;
         if run.level == super::mobility::LEARN_LEVEL {
             if let Some(m) = super::mobility::for_class(run.class.id) {
-                run.banner = Some((format!("You have learned {}! Press F.", m.name), 4.0));
+                run.banner = Some((
+                    format!("You have learned {}! {} F.", m.name, super::hud::PRESS),
+                    4.0,
+                ));
             }
         }
     }

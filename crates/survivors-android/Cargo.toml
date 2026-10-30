@@ -21,7 +21,8 @@ dev = ["benilla-app/dev"]
 benilla-app = { path = "../benilla-app", default-features = false }
 
 [target.'cfg(target_os = "android")'.dependencies]
-bevy = { workspace = true, features = ["android-native-activity"] }
+# `debug` keeps system and component names, so a crash report on the device names its system.
+bevy = { workspace = true, features = ["android-native-activity", "debug"] }
 
 [build-dependencies]
 benilla-buildstamp = { path = "../benilla-buildstamp" }

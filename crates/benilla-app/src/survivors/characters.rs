@@ -12,6 +12,10 @@
 //! Files, through [`crate::local_state`] so the page's store answers too:
 //! `benilla-config/characters/index.txt` (the ids, in order, then `active <id>`) and
 //! `characters/<id>.toml` per character.
+//!
+//! **Progression:** the zones unlock in the list's order ([`menu::zone_order`], easiest first),
+//! each once the one before is completed on Normal; a locked zone shows only "???". On a zone,
+//! Heroic opens after Normal and Mythic after Heroic ([`Unlocks`]).
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -92,6 +96,58 @@ impl Characters {
     }
 }
 
+/// What the active character may pick, worked out from its completions.
+#[derive(Resource)]
+pub(super) struct Unlocks {
+    /// Per map ([`data::MAPS`] index): open, and the hardest difficulty open on it.
+    zones: Vec<Option<Difficulty>>,
+}
+
+impl Default for Unlocks {
+    fn default() -> Self {
+        Self::for_character(None)
+    }
+}
+
+impl Unlocks {
+    pub fn zone(&self, map: usize) -> bool {
+        self.zones.get(map).is_some_and(Option::is_some)
+    }
+
+    pub fn difficulty(&self, map: usize, d: Difficulty) -> bool {
+        self.zones
+            .get(map)
+            .copied()
+            .flatten()
+            .is_some_and(|top| d as u8 <= top as u8)
+    }
+
+    fn for_character(c: Option<&Character>) -> Self {
+        let mut zones = vec![None; data::MAPS.len()];
+        let done = |m: usize, d: Difficulty| c.is_some_and(|c| c.completed(m, d));
+        let mut previous_done = true;
+        for (m, ..) in menu::zone_order() {
+            if !previous_done {
+                break;
+            }
+            let top = if done(m, Difficulty::Heroic) {
+                Difficulty::Mythic
+            } else if done(m, Difficulty::Normal) {
+                Difficulty::Heroic
+            } else {
+                Difficulty::Normal
+            };
+            zones[m] = Some(top);
+            previous_done = done(m, Difficulty::Normal);
+        }
+        Self { zones }
+    }
+}
+
+/// A locked zone row's cover: "???" over its name and marks.
+#[derive(Component)]
+struct LockCover(usize);
+
 /// The results screen's completion line, placed by `hud::setup_hud`.
 #[derive(Component)]
 pub(super) struct CompletionLine;
@@ -130,6 +186,7 @@ enum CharButton {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Characters>()
+        .init_resource::<Unlocks>()
         .add_systems(Startup, spawn_ui.after(super::hud::setup_hud))
         .add_systems(
             Update,
@@ -137,6 +194,7 @@ pub(super) fn plugin(app: &mut App) {
                 load,
                 press,
                 apply_active,
+                compute_unlocks,
                 rebuild_rows,
                 show,
                 mark_zones,
@@ -243,7 +301,10 @@ fn text(font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) -> i
             ..default()
         },
         TextColor(color),
-        TextShadow::default(),
+        TextShadow {
+            offset: Vec2::splat(1.0),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.85),
+        },
         Pickable::IGNORE,
     )
 }
@@ -291,10 +352,11 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
             CharPanel,
             Node {
                 position_type: PositionType::Absolute,
+                // Under the WoW logo, which draws over the top of the tower's place.
                 left: Val::Px(28.0),
-                top: Val::Px(74.0),
+                top: Val::Px(136.0),
                 width: Val::Px(236.0),
-                height: Val::Px(590.0),
+                height: Val::Px(528.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(6.0),
@@ -393,6 +455,7 @@ fn press(
     mut selection: ResMut<Selection>,
     mut rng: ResMut<Rng>,
     creatures: Option<Res<crate::entities::Creatures>>,
+    unlocks: Res<Unlocks>,
 ) {
     for (interaction, action, mut bg) in &mut buttons {
         if !matches!(action, CharButton::Pick(_) | CharButton::Difficulty(_)) {
@@ -433,6 +496,7 @@ fn press(
                     chars.delete_armed = Some(id);
                 }
             }
+            CharButton::Difficulty(d) if !unlocks.difficulty(selection.map, d) => {}
             CharButton::Difficulty(d) => {
                 selection.difficulty = d;
                 selection.version += 1;
@@ -535,6 +599,7 @@ fn rebuild_rows(
                 Node {
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(1.0),
                     padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
@@ -629,6 +694,27 @@ fn mark_zones(
                     marks.spawn((text(&font.0, &d.name()[..1], 13.0, DIM), ZoneMark(i, d)));
                 }
             });
+            // Over the name and the marks while the zone is locked: nothing of what is next.
+            row.spawn((
+                LockCover(i),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(-4.0),
+                    right: Val::Px(-4.0),
+                    top: Val::Px(-2.0),
+                    bottom: Val::Px(-2.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::left(Val::Px(4.0)),
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.07, 0.07, 0.07)),
+                Pickable::IGNORE,
+            ))
+            .with_children(|cover| {
+                cover.spawn(text(&font.0, "???", 15.0, DIM));
+                cover.spawn(text(&font.0, "Locked", 12.0, DIM));
+            });
         });
     }
 }
@@ -643,10 +729,28 @@ fn refresh_labels(
         Query<&mut Text, With<DeleteLabel>>,
         Query<&mut Text, With<CountLabel>>,
     )>,
-    mut difficulty: Query<(&CharButton, &mut BackgroundColor, &mut BorderColor)>,
+    mut difficulty: Query<(
+        &CharButton,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &Children,
+    )>,
+    mut covers: Query<(&LockCover, &mut Node)>,
+    mut label_colors: Query<&mut TextColor, Without<ZoneMark>>,
+    unlocks: Res<Unlocks>,
 ) {
-    if !chars.is_changed() && !selection.is_changed() {
+    if !chars.is_changed() && !selection.is_changed() && !unlocks.is_changed() {
         return;
+    }
+    for (cover, mut node) in &mut covers {
+        let display = if unlocks.zone(cover.0) {
+            Display::None
+        } else {
+            Display::Flex
+        };
+        if node.display != display {
+            node.display = display;
+        }
     }
     let active = chars.active();
     for (mark, mut color) in &mut marks {
@@ -668,13 +772,57 @@ fn refresh_labels(
     if let Ok(mut t) = texts.p2().single_mut() {
         t.0 = format!("Characters {}/{}", chars.list.len(), MAX_CHARACTERS);
     }
-    for (action, mut bg, mut border) in &mut difficulty {
+    for (action, mut bg, mut border, children) in &mut difficulty {
         let CharButton::Difficulty(d) = *action else {
             continue;
         };
+        let open = unlocks.difficulty(selection.map, d);
         let on = selection.difficulty == d;
         bg.0 = if on { PICKED } else { BUTTON };
-        *border = BorderColor::all(if on { GOLD } else { EDGE });
+        *border = BorderColor::all(match (on, open) {
+            (true, _) => GOLD,
+            (false, true) => EDGE,
+            (false, false) => DIM.with_alpha(0.4),
+        });
+        for child in children.iter() {
+            if let Ok(mut color) = label_colors.get_mut(child) {
+                color.0 = if open {
+                    Color::WHITE
+                } else {
+                    DIM.with_alpha(0.6)
+                };
+            }
+        }
+    }
+}
+
+/// The active character's unlocks; a pick that is no longer open falls back to what is: the
+/// furthest open zone, Normal.
+fn compute_unlocks(
+    chars: Res<Characters>,
+    mut unlocks: ResMut<Unlocks>,
+    mut selection: ResMut<Selection>,
+    mut seen: Local<Option<(Option<u32>, u32)>>,
+) {
+    let key = (chars.active, chars.version);
+    if *seen != Some(key) {
+        *seen = Some(key);
+        *unlocks = Unlocks::for_character(chars.active());
+    }
+    if !unlocks.zone(selection.map) {
+        if let Some(m) = menu::zone_order()
+            .into_iter()
+            .map(|(m, ..)| m)
+            .filter(|&m| unlocks.zone(m))
+            .last()
+        {
+            selection.map = m;
+            selection.version += 1;
+        }
+    }
+    if !unlocks.difficulty(selection.map, selection.difficulty) {
+        selection.difficulty = Difficulty::Normal;
+        selection.version += 1;
     }
 }
 

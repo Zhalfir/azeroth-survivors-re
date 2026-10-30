@@ -203,6 +203,21 @@ impl Offer {
 #[derive(Resource)]
 pub(super) struct HudFont(pub(super) Handle<Font>);
 
+/// The verb for a key on a keyboard, or a touch button of the same name on Android
+/// (`super::touch`).
+#[cfg(not(target_os = "android"))]
+pub(super) const PRESS: &str = "Press";
+#[cfg(target_os = "android")]
+pub(super) const PRESS: &str = "Tap";
+#[cfg(not(target_os = "android"))]
+const CARD_HINT: &str = "Click a card, or press 1, 2 or 3";
+#[cfg(target_os = "android")]
+const CARD_HINT: &str = "Tap a card";
+#[cfg(not(target_os = "android"))]
+const AGAIN_HINT: &str = "press Enter to play again";
+#[cfg(target_os = "android")]
+const AGAIN_HINT: &str = "tap Play again";
+
 pub(super) fn rgb(hex: u32) -> Color {
     Color::srgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
@@ -715,7 +730,7 @@ pub(super) fn setup_hud(
                     ..default()
                 },
             ));
-            root.spawn(centered(f, "Click a card, or press 1, 2 or 3", 14.0, DIM));
+            root.spawn(centered(f, CARD_HINT, 14.0, DIM));
         });
 
     // --- Pause. ---
@@ -1333,7 +1348,7 @@ pub(super) fn refresh_hud(
         **t = title;
     }
     let summary = format!(
-        "{} {} in {}   —   press Enter to play again",
+        "{} {} in {}   —   {AGAIN_HINT}",
         crate::char_select::race_name(run.race),
         run.class.name,
         selection.map_def().name,
@@ -2181,7 +2196,7 @@ pub(super) fn icon_tooltip(
         TipFor::Mobility => run.mobility().map(|m| {
             vec![
                 TipLine::new(spell_name(spells.as_deref(), m.spell, m.name), Color::WHITE).header(),
-                TipLine::new("Press F", Color::WHITE)
+                TipLine::new(&format!("{PRESS} F"), Color::WHITE)
                     .right(format!("{} sec cooldown", num(m.cooldown)), Color::WHITE),
                 TipLine::new(m.desc, GOLD),
             ]

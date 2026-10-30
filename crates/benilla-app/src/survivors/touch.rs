@@ -456,16 +456,23 @@ fn spawn_overlay(mut commands: Commands) {
                 if key == KeyCode::KeyC {
                     slot.spawn((
                         CamGlow,
+                        // A gold rim, the checked state. `CheckButtonHilight` is drawn additive in
+                        // the client; bevy_ui blends it normally, a black square over the icon.
                         Node {
                             position_type: PositionType::Absolute,
                             width: Val::Percent(100.0),
                             height: Val::Percent(100.0),
+                            border: UiRect::all(Val::Px(3.0)),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
                             ..default()
                         },
-                        hidden.clone(),
-                        super::hud::UiArt::crop(
-                            "Interface\\Buttons\\CheckButtonHilight",
-                            [0.0, 1.0, 0.0, 1.0],
+                        BorderColor::all(Color::srgb(1.0, 0.82, 0.0)),
+                        BoxShadow::new(
+                            Color::srgba(1.0, 0.75, 0.1, 0.8),
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(2.0),
+                            Val::Px(8.0),
                         ),
                         Pickable::IGNORE,
                         Visibility::Hidden,
@@ -484,7 +491,15 @@ fn show_overlay(
     ui_scale: Res<UiScale>,
     mut commands: Commands,
     mobility_icon: Query<(Entity, Option<&super::hud::SpellIcon>), With<MobilityButtonIcon>>,
-    mut glow: Query<&mut Visibility, (With<CamGlow>, Without<PlayButton>)>,
+    mut glow: Query<
+        &mut Visibility,
+        (
+            With<CamGlow>,
+            Without<PlayButton>,
+            Without<StickRing>,
+            Without<StickKnob>,
+        ),
+    >,
     mut ring: Query<(&mut Node, &mut Visibility), (With<StickRing>, Without<StickKnob>)>,
     mut knob: Query<(&mut Node, &mut Visibility), (With<StickKnob>, Without<StickRing>)>,
     mut play: Query<

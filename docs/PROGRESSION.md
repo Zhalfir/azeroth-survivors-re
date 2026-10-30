@@ -29,6 +29,25 @@ from **talents** and **gear**; there are no character levels.
 - **Endless:** a completed map/difficulty can be replayed with no end; enemies keep scaling with
   time. No new talent point.
 
+## Unlock order
+
+- **Zones unlock in order**, easiest first (the menu's list order); each opens when the one before
+  is completed on Normal. A locked zone shows "???" and "Locked": what comes next is a surprise.
+- **On each zone, Heroic opens after Normal, Mythic after Heroic.** (Built.)
+- Every completion is still 1 talent point: Normal gives 16 + Molten Core = 17, Heroic 17, Mythic
+  17, so a full 51-point character has cleared everything on Mythic.
+
+## Tier armour: cosmetic rewards per difficulty
+
+- **Every zone on Normal → Tier 1** (Molten Core sets: Arcanist, Lawbringer, Might, …),
+  **every zone on Heroic → Tier 2** (Blackwing Lair: Netherwind, Judgement, Wrath, …),
+  **every zone on Mythic → Tier 3** (Naxxramas: Frostfire, Redemption, Dreadnaught, …).
+- Selectable on the character screen once unlocked; looks only, no stats.
+- Open question: the hero is drawn today as a class-trainer NPC model with its armour baked in.
+  Showing tier sets means dressing it as a player character, piece by piece from the game data.
+  The engine dresses players already; how much the survivors hero needs to change is to be
+  checked before this is scheduled.
+
 ## Loot
 
 - **Hardcore:** loot found in a run is kept **only if the map is completed**. Dying loses it — in

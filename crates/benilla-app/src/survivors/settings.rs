@@ -111,7 +111,7 @@ fn spawn_panel(commands: &mut Commands, font: &Handle<Font>) {
                 display: Display::None,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+            BackgroundColor(Color::srgba(0.02, 0.015, 0.01, 0.96)),
             GlobalZIndex(435),
         ))
         .with_children(|root| {
