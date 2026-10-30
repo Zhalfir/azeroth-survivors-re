@@ -225,3 +225,18 @@ The end was right (a four-to-five-minute final boss, won narrowly by the two str
 the start was a wall. Change: Heroic's and Mythic's health and damage steps ease in, 35% of the
 step at the start and all of it from half time (Mythic starts at ×1.98 health and ×1.53 damage).
 The final boss keeps the full step. The batch cap is now 30 minutes a run.
+
+## Round 9 — Mythic eased in (Elwynn Forest, 34 points + T2)
+
+| Class | Round 8 | Round 9 |
+|---|---|---|
+| Priest | died 3:09 | **Victory, 24:27**, level 139 |
+| Hunter | died 0:58 | died **13:03**, level 98 (Murloc Streamrunner, 78 a blow) |
+| Warrior | final boss at 9% at the cap | **Victory, 24:18**, level 118 |
+| Mage | final boss at 15% at the cap | not measured (the tablet dropped off USB) |
+
+The shape is now the intended one: no early wall, the weaker kit falls in the last third, the
+stronger ones win after a four-to-five-minute final boss. Elwynn is the easiest zone of the
+pass and the auto-player is a lower bound for a person, so two wins in three on Mythic's
+first zone is consistent with "an achievement" over the whole pass. Next: a mid-pass zone
+(Duskwood, Stranglethorn) on Heroic and Mythic, and several runs per class.
