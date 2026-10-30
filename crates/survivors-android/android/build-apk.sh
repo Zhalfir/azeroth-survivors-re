@@ -6,6 +6,9 @@
 # Needs: rustup (the repo's toolchain + `aarch64-linux-android`), `cargo install cargo-ndk`, and
 # an Android SDK with build-tools, a platform and the NDK at $ANDROID_HOME (or the Homebrew
 # android-commandlinetools root). CARGO_TARGET_DIR is honoured: the build is ~6 GB.
+#
+# APK_FEATURES=dev adds `--features dev` (the GPU frame meter, `WOW_GPU_MS=1`, lives behind it);
+# unset, the build is the shipping one. Balance APKs use it so the combat log carries gpu_ms.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +23,9 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 cd "$ROOT"
-cargo ndk -t arm64-v8a -P 26 -o "$STAGE/lib" build --profile "$PROFILE" -p survivors-android
+FEATURES=()
+[ -z "${APK_FEATURES:-}" ] || FEATURES=(--features "$APK_FEATURES")
+cargo ndk -t arm64-v8a -P 26 -o "$STAGE/lib" build --profile "$PROFILE" -p survivors-android ${FEATURES[@]+"${FEATURES[@]}"}
 
 # libc++_shared.so: `android_shared_stdcxx` links it, and cargo-ndk copies it only sometimes.
 CXX="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"

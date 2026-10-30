@@ -2,6 +2,8 @@
 # Usage: run_batch.sh <round-name> <runs-per-class> <map> <difficulty> <class...>
 # Plays auto runs per class on the tablet and pulls their combat logs into $BALANCE_DIR/<round>/.
 # Every run sets WOW_GPU_MS=1, so the combat log's ticks carry gpu_ms beside cpu_ms (analyze.py gpu50).
+# The meter is dev-only: build the APK with `APK_FEATURES=dev crates/survivors-android/android/build-apk.sh`,
+# or gpu_ms is simply absent from the log.
 # EXTRA_ENV adds lines to android-env.txt, e.g. EXTRA_ENV='WOW_SURVIVORS_TALENTS=17\nWOW_SURVIVORS_TIER=1'.
 ROUND=$1; N=$2; MAP=$3; DIFF=$4; shift 4
 ADB=/opt/homebrew/share/android-commandlinetools/platform-tools/adb
