@@ -51,10 +51,48 @@ from **talents** and **gear**; there are no character levels.
 
 ## Characters
 
-- Saved characters, WoW-style select screen: name, race, class, gender. Create and **Delete**
-  (confirm by typing the name).
+- Saved characters, WoW-style select screen: name, race, class, gender. **At most 8.** Create and
+  **Delete** (confirm by typing the name).
 - Each character keeps: talents, completed map/difficulty list, equipped gear, bags.
 - One file per character in the save folder (`benilla-config/characters/`).
+
+## Field pickups (in a run)
+
+Vampire Survivors-style drops on the ground, **auto-looted** by walking over them (the magnet
+radius applies). Few of them: a pickup should feel like a small win, not litter. Rates and
+strength are tuned per difficulty and scale with the run's progress, like enemy health already
+does (`data::progress`).
+
+- **Healing Potion** (WoW's red potion icon): heals a share of max HP. Rare drop from normal
+  enemies, more likely from elites; fewer on Mythic.
+- **Small chest** from elites and regular bosses: an immediate reward inside the run (a free
+  level-up card, or an upgrade to an owned spell), as Vampire Survivors' chests do. Distinct from
+  the **boss loot chest** (gear, kept only on completion).
+- Candidates for later: a gold-coin drop if a currency is added, a magnet pickup that pulls every
+  gem on screen, a short-lived damage buff (Elixir of the Mongoose / Giants).
+
+## Combat stats: damage meter
+
+To compare builds and see which ability carries a run:
+
+- Every hit is attributed to the ability that dealt it (today only the run total is kept).
+- **Results screen:** a Details!/Recount-style list, each ability with its icon, total damage,
+  share of the run, and damage per second while owned.
+- **In the run:** an optional small live meter (top N abilities), toggled in settings.
+- Later: keep each character's best run per map for comparison.
+
+## Settings
+
+In the pause menu, all saved between sessions:
+
+- **Graphics: High / Medium / Low** (built, Android only, not yet tested on a device): the world's
+  render resolution (1920 / 1440 / 1080 px long side; the UI stays sharp), view distance, shadows,
+  spell effects, glow, weather.
+- **Sound, as WoW's own panel:** Master, Sound effects (combat), Music and Ambience volume, each
+  with its on/off switch. The engine already has all of these as 1.12 CVars (`MasterVolume`,
+  `SoundVolume`, `MusicVolume`, `AmbienceVolume`, `EnableMusic`, …); only the screen is new.
+- **Show damage meter** in the run.
+- Anti-aliasing (`gxMultisample`, applies after a restart) once it is checked on the tablet.
 
 ## Talents
 
@@ -67,13 +105,31 @@ from **talents** and **gear**; there are no character levels.
   shields), Restoration Druid (Treants, Thorns, regeneration), Restoration Shaman (totems that heal
   the hero and strike enemies).
 
+## What exists today
+
+Much of the loop is already in the game and gets reshaped rather than written:
+
+- A win condition: survive `VICTORY_SECS` (15 min), "Victory!" on the results screen, and a
+  victory line per zone ("Elwynn Forest is safe once more.").
+- Six bosses per zone from its own roster, one every `BOSS_EVERY_SECS` (2:15).
+- Enemy count, health and damage scale with the run's progress (`data::progress`).
+- The total damage of a run (`Run::damage_done`), shown on the results screen.
+- A pick screen built from the 1.12 character create/select glue art (`survivors/menu.rs`): race,
+  gender and class on the left, zones on the right. It becomes the **Create** screen; character
+  select is a second screen in the same style.
+
 ## Build order
 
-Each phase ends with a build that plays on the tablet.
+Each phase ends with a build that plays on the tablet. Nothing is built for a phase until the
+plan for it is agreed.
 
-1. **Characters:** create / select / delete, saved per character; map completion with a final
-   boss and difficulty timers; completion records.
-2. **Talents:** the tree screen and points from completions; all 9 classes.
-3. **Gear and boss chests:** rarities, 5 slots, bags, keep-on-completion.
-4. **Difficulty depth:** Heroic/Mythic affixes and boss mechanics, Endless, raids.
-5. **Legendaries:** Thunderfury and Sulfuras first.
+1. **Settings and meter:** the Sound panel next to Graphics; the damage meter (results screen
+   first, then the live one). Small, and it makes every later phase easier to tune.
+2. **Characters and completion:** create (the existing pick screen) / select / delete, max 8;
+   difficulty choice with Normal 10 / Heroic 15 / Mythic 20 minute timers; a final boss at the
+   timer, the map completed when it dies; completions recorded per character.
+3. **Field pickups:** potions and small chests, auto-loot, tuned per difficulty.
+4. **Talents:** the tree screen and points from completions; all 9 classes.
+5. **Gear and boss chests:** rarities, 5 slots, bags, keep-on-completion.
+6. **Difficulty depth:** Heroic/Mythic affixes and boss mechanics, Endless, raids.
+7. **Legendaries:** Thunderfury and Sulfuras first.
