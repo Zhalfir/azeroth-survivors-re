@@ -13,7 +13,9 @@
 //! - `build` — every ability and passive with its rank, on each change (`items`: none yet);
 //! - `boss_hit` — each blow a boss lands on the hero: who, how much, health before;
 //! - `tick` — every second of run time: hero health, level, XP gained, enemies alive, frames per
-//!   second and the second's longest frame (`max_frame_ms`, which an average hides), and per
+//!   second and the second's longest frame (`max_frame_ms`, which an average hides), the CPU
+//!   frame time (`cpu_ms` mean, `cpu_ms_max`) and, with `WOW_GPU_MS=1`, the GPU's (`gpu_ms`, a
+//!   key that is absent without the meter), and per
 //!   spell its damage, hits, crits and casts; per enemy type the damage it dealt the hero (and
 //!   how many blows), its kills and its spawns;
 //! - `end` — won or lost, the killing blow, the totals.
@@ -325,6 +327,7 @@ fn tick(
     mut state: Local<(f32, u32, f32, f32)>,
     enemies: Query<&Enemy>,
     spells: Option<Res<crate::ui_action::Spells>>,
+    mut samples: ResMut<super::frametime::FrameSamples>,
 ) {
     let (next_at, frames, since, worst) = &mut *state;
     *frames += 1;
@@ -345,6 +348,7 @@ fn tick(
     *frames = 0;
     *since = now;
     let max_frame_ms = std::mem::take(worst);
+    let split = samples.take();
     let Ok(mut t) = TICK.lock() else { return };
     let spell_json: Vec<String> = t
         .spells
@@ -374,19 +378,22 @@ fn tick(
             .join(",")
     };
     let alive = enemies.iter().filter(|e| !e.dead).count();
-    let line = format!(
-        "{{\"t\":{:.0},\"type\":\"tick\",\"hp\":{:.0},\"max_hp\":{:.0},\"level\":{},\"xp_gained\":{:.1},\"kills_total\":{},\"alive\":{alive},\"fps\":{fps:.0},\"max_frame_ms\":{max_frame_ms:.0},\"spells\":{{{}}},\"taken\":{{{}}},\"kills\":{{{}}},\"spawns\":{{{}}}}}",
-        run.elapsed,
-        run.hp,
-        run.stats().max_hp,
-        run.level,
-        t.xp,
-        run.kills,
-        spell_json.join(","),
-        taken_json.join(","),
-        counts(&t.kills),
-        counts(&t.spawns),
-    );
+    let line = tick_line(&TickLine {
+        elapsed: run.elapsed,
+        hp: run.hp,
+        max_hp: run.stats().max_hp,
+        level: run.level,
+        xp: t.xp,
+        kills_total: run.kills,
+        alive,
+        fps,
+        max_frame_ms,
+        spells: spell_json.join(","),
+        taken: taken_json.join(","),
+        kills: counts(&t.kills),
+        spawns: counts(&t.spawns),
+        split,
+    });
     t.spells.clear();
     t.taken.clear();
     t.kills.clear();
@@ -394,6 +401,52 @@ fn tick(
     t.xp = 0.0;
     drop(t);
     run_line(line);
+}
+
+/// What one `tick` line holds; the four maps are already JSON object bodies.
+struct TickLine {
+    elapsed: f32,
+    hp: f32,
+    max_hp: f32,
+    level: u32,
+    xp: f32,
+    kills_total: u32,
+    alive: usize,
+    fps: f32,
+    max_frame_ms: f32,
+    spells: String,
+    taken: String,
+    kills: String,
+    spawns: String,
+    split: super::frametime::FrameSplit,
+}
+
+/// The `tick` line as JSON. The CPU fields are appended after the original ones so older readers
+/// of the file keep working; `gpu_ms` is left out, not zeroed, when there is no GPU reading.
+fn tick_line(l: &TickLine) -> String {
+    let gpu = l
+        .split
+        .gpu_ms_mean
+        .map(|g| format!(",\"gpu_ms\":{g:.1}"))
+        .unwrap_or_default();
+    format!(
+        "{{\"t\":{:.0},\"type\":\"tick\",\"hp\":{:.0},\"max_hp\":{:.0},\"level\":{},\"xp_gained\":{:.1},\"kills_total\":{},\"alive\":{},\"fps\":{:.0},\"max_frame_ms\":{:.0},\"spells\":{{{}}},\"taken\":{{{}}},\"kills\":{{{}}},\"spawns\":{{{}}},\"cpu_ms\":{:.1},\"cpu_ms_max\":{:.1}{gpu}}}",
+        l.elapsed,
+        l.hp,
+        l.max_hp,
+        l.level,
+        l.xp,
+        l.kills_total,
+        l.alive,
+        l.fps,
+        l.max_frame_ms,
+        l.spells,
+        l.taken,
+        l.kills,
+        l.spawns,
+        l.split.cpu_ms_mean,
+        l.split.cpu_ms_max,
+    )
 }
 
 /// The build into the run file whenever it changes: every ability and passive with its rank.
@@ -523,5 +576,50 @@ fn run_over(run: Res<Run>) {
     }
     if let Ok(mut t) = TAKEN.lock() {
         t.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::frametime::FrameSplit;
+    use super::*;
+
+    fn line(gpu_ms_mean: Option<f32>) -> String {
+        tick_line(&TickLine {
+            elapsed: 12.0,
+            hp: 90.0,
+            max_hp: 100.0,
+            level: 3,
+            xp: 4.5,
+            kills_total: 7,
+            alive: 20,
+            fps: 59.6,
+            max_frame_ms: 31.0,
+            spells: "\"Fireball\":{\"id\":1,\"damage\":10,\"hits\":1,\"crits\":0,\"casts\":1}".into(),
+            taken: String::new(),
+            kills: String::new(),
+            spawns: String::new(),
+            split: FrameSplit {
+                cpu_ms_mean: 10.0,
+                cpu_ms_max: 20.0,
+                gpu_ms_mean,
+            },
+        })
+    }
+
+    /// Without the GPU meter the line must still be JSON, with no `gpu_ms` key at all.
+    #[test]
+    fn tick_json_without_gpu() {
+        let v: serde_json::Value = serde_json::from_str(&line(None)).unwrap();
+        assert_eq!(v["type"], "tick");
+        assert_eq!(v["cpu_ms"], 10.0);
+        assert_eq!(v["cpu_ms_max"], 20.0);
+        assert!(v.get("gpu_ms").is_none());
+    }
+
+    #[test]
+    fn tick_json_with_gpu() {
+        let v: serde_json::Value = serde_json::from_str(&line(Some(12.34))).unwrap();
+        assert_eq!(v["gpu_ms"], 12.3);
     }
 }

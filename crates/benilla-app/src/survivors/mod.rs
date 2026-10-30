@@ -12,6 +12,7 @@ mod combatlog;
 mod data;
 mod enemies;
 mod fill;
+mod frametime;
 mod grade;
 #[cfg(target_os = "android")]
 mod graphics;
@@ -58,6 +59,7 @@ impl Plugin for SurvivorsPlugin {
                 settings::plugin,
                 characters::plugin,
                 combatlog::plugin,
+                frametime::plugin,
                 records::plugin,
                 talents::plugin,
             ))
