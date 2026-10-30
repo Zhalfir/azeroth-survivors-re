@@ -1437,7 +1437,9 @@ pub(crate) fn hp_scale(elapsed: f32) -> f32 {
 
 /// Enemy damage grows the same way.
 pub(crate) fn damage_scale(elapsed: f32) -> f32 {
-    (1.0 + progress(elapsed) * 0.9) * difficulty().damage()
+    // ×1.6 at the bell (was ×1.9): late, a horde mob's blow of ~50 against a 320 pool ended
+    // runs that were otherwise won (tablet balance runs, 2026-10-31).
+    (1.0 + progress(elapsed) * 0.6) * difficulty().damage()
 }
 
 /// The experience to go from `level` to the next: Vampire Survivors' curve, cheap early.

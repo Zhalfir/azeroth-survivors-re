@@ -33,6 +33,7 @@ pub(super) struct Auto {
     shot_n: u32,
     log_t: f32,
     dir: Vec3,
+    difficulty: data::Difficulty,
     /// The hero's health fraction, for the planner's caution.
     hp_frac: f32,
     /// The screens already captured once: the menu, the first level-ups, the results.
@@ -82,6 +83,14 @@ pub(super) fn from_env() -> Option<Auto> {
                     .unwrap_or(0)
             })
     });
+    // `WOW_SURVIVORS_DIFFICULTY=normal|heroic|mythic`, Normal by default.
+    let difficulty = crate::webenv::var("WOW_SURVIVORS_DIFFICULTY")
+        .and_then(|d| {
+            data::Difficulty::ALL
+                .into_iter()
+                .find(|x| x.name().eq_ignore_ascii_case(d.trim()))
+        })
+        .unwrap_or_default();
     let shots = std::env::var_os("WOW_SURVIVORS_SHOTS").map(std::path::PathBuf::from);
     if let Some(dir) = &shots {
         let _ = std::fs::create_dir_all(dir);
@@ -89,6 +98,7 @@ pub(super) fn from_env() -> Option<Auto> {
     Some(Auto {
         class,
         map,
+        difficulty,
         idle,
         all,
         late,
@@ -237,6 +247,10 @@ pub(super) fn drive(
     auto.frames += 1;
     match phase.get() {
         Phase::Menu => {
+            if selection.difficulty != auto.difficulty {
+                selection.difficulty = auto.difficulty;
+                selection.version += 1;
+            }
             if selection.map != auto.map {
                 selection.map = auto.map;
                 selection.version += 1;

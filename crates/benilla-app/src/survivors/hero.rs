@@ -485,6 +485,7 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
     if run.immune_t > 0.0 || run.dead_t.is_some() || god_mode() {
         return 0.0;
     }
+    run.last_hurt = run.elapsed;
     let mut dmg = (raw - run.stats().armor).max(1.0);
     if run.shield_t > 0.0 && run.shield > 0.0 {
         let absorbed = dmg.min(run.shield);
@@ -494,6 +495,12 @@ pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
     run.hp -= dmg;
     dmg
 }
+
+/// Health a second every hero mends, on top of its Regen stat.
+const BASE_REGEN: f32 = 0.4;
+/// After this long without a blow, the hero mends [`CALM_REGEN`] of its pool a second more.
+const CALM_SECS: f32 = 4.0;
+const CALM_REGEN: f32 = 0.015;
 
 /// The clock, regeneration, the timed buffs and their visuals, death and victory.
 pub(super) fn hero_vitals(
@@ -521,7 +528,13 @@ pub(super) fn hero_vitals(
     for t in [&mut r.shield_t, &mut r.immune_t, &mut r.thorns_t] {
         *t = (*t - dt).max(0.0);
     }
-    let mut heal = stats.regen * dt;
+    // Every hero mends a little, and faster once out of reach for a while: early scratches must
+    // not stay for the whole run (the tablet's balance runs, 2026-10-31: a Hunter sat at 47/162
+    // for fifteen seconds before the first ring took it).
+    let mut heal = (stats.regen + BASE_REGEN) * dt;
+    if run.elapsed - run.last_hurt > CALM_SECS {
+        heal += CALM_REGEN * stats.max_hp * dt;
+    }
     if run.heal_t > 0.0 {
         heal += run.heal_rate * dt.min(run.heal_t);
         run.heal_t = (run.heal_t - dt).max(0.0);

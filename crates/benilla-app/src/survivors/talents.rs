@@ -312,9 +312,16 @@ pub(super) fn plugin(app: &mut App) {
 
 /// Fold the character's talents and tier into the run, each time play (re)starts; a fresh run
 /// also fills the larger health pool.
-fn apply_bonus(mut run: ResMut<Run>, selection: Res<Selection>, chars: Res<Characters>) {
+fn apply_bonus(
+    mut run: ResMut<Run>,
+    selection: Res<Selection>,
+    chars: Res<Characters>,
+    auto: Option<Res<super::auto::Auto>>,
+) {
+    // The auto-player takes its power from the test levers, never the menu's character.
     let character = selection
         .character
+        .filter(|_| auto.is_none())
         .and_then(|id| chars.list.iter().find(|c| c.id == id));
     let class_id = run.class.id;
     let (spent, tier) = match character {

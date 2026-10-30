@@ -840,7 +840,12 @@ fn compute_unlocks(
     mut unlocks: ResMut<Unlocks>,
     mut selection: ResMut<Selection>,
     mut seen: Local<Option<(Option<u32>, u32, Difficulty)>>,
+    auto: Option<Res<super::auto::Auto>>,
 ) {
+    // The auto-player picks its own zone and difficulty, past any character's locks.
+    if auto.is_some() {
+        return;
+    }
     if !unlocks.difficulty(selection.map, selection.difficulty) {
         selection.difficulty = Difficulty::Normal;
         selection.version += 1;
@@ -872,9 +877,11 @@ fn record_completion(
     selection: Res<Selection>,
     mut chars: ResMut<Characters>,
     mut lines: Query<&mut Text, With<CompletionLine>>,
+    auto: Option<Res<super::auto::Auto>>,
 ) {
     let mut line = String::new();
-    if run.won {
+    // An unattended run never completes a map for the character on the menu.
+    if run.won && auto.is_none() {
         let difficulty = data::difficulty();
         let map = data::MAPS[selection.stage.min(data::MAPS.len() - 1)].name;
         if let Some(c) = selection

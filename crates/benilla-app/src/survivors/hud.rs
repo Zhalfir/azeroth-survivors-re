@@ -999,6 +999,30 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     true
 }
 
+/// Whether a level-up has anything to offer but the heal: a maxed build's levels are banked as
+/// heals without stopping play (`enemies::collect_gems`), not a card screen of one card.
+pub(super) fn build_maxed(run: &Run) -> bool {
+    let abilities_done = run
+        .abilities
+        .iter()
+        .all(|o| o.level >= data::MAX_ABILITY_LEVEL)
+        && (run.abilities.len() >= data::MAX_ABILITIES
+            || run
+                .class
+                .pool
+                .iter()
+                .all(|k| run.abilities.iter().any(|o| o.def.key == *k)));
+    let passives_done = run
+        .passives
+        .iter()
+        .all(|(_, l)| *l >= data::MAX_PASSIVE_LEVEL)
+        && (run.passives.len() >= data::MAX_PASSIVES
+            || data::PASSIVES
+                .iter()
+                .all(|p| run.passives.iter().any(|(q, _)| q.key == p.key)));
+    abilities_done && passives_done
+}
+
 fn choices_for(run: &Run, rng: &mut Rng) -> Vec<Choice> {
     let mut pool: Vec<(Choice, f32)> = Vec::new();
     for (i, o) in run.abilities.iter().enumerate() {
@@ -1075,6 +1099,7 @@ pub(super) fn pick(
         Choice::Heal => "heal".to_string(),
     };
     super::combatlog::event(run.elapsed, format!("level {}: {picked}", run.level));
+    let max_before = run.stats().max_hp;
     match choice {
         Choice::NewAbility(def) => run.abilities.push(Owned {
             def,
@@ -1085,6 +1110,11 @@ pub(super) fn pick(
         Choice::NewPassive(p) => run.passives.push((p, 1)),
         Choice::UpPassive(k) => run.passives[k].1 += 1,
         Choice::Heal => run.hp = run.stats().max_hp,
+    }
+    // A bigger pool comes filled: what Fortitude adds, the hero has.
+    let max_after = run.stats().max_hp;
+    if max_after > max_before {
+        run.hp = (run.hp + max_after - max_before).min(max_after);
     }
     run.version += 1;
     run.pending_levels = run.pending_levels.saturating_sub(1);

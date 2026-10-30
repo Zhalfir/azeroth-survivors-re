@@ -265,6 +265,8 @@ pub(super) struct Stats {
 }
 
 pub(super) const BASE_HP: f32 = 120.0;
+/// Health each hero level adds to the base pool, before Fortitude multiplies it.
+pub(super) const HP_PER_LEVEL: f32 = 1.5;
 pub(super) const BASE_SPEED: f32 = 7.0;
 pub(super) const BASE_MAGNET: f32 = 4.5;
 
@@ -292,6 +294,8 @@ pub(super) struct Run {
     pub shield: f32,
     pub shield_t: f32,
     pub immune_t: f32,
+    /// Run time of the last blow that reached the hero, for out-of-combat regeneration.
+    pub last_hurt: f32,
     pub thorns: f32,
     pub thorns_t: f32,
     pub thorns_spell: u32,
@@ -332,6 +336,7 @@ impl Default for Run {
             shield: 0.0,
             shield_t: 0.0,
             immune_t: 0.0,
+            last_hurt: 0.0,
             thorns: 0.0,
             thorns_t: 0.0,
             thorns_spell: 0,
@@ -372,7 +377,7 @@ impl Run {
     pub fn stats(&self) -> Stats {
         let mut s = Stats {
             might: 1.0,
-            max_hp: BASE_HP,
+            max_hp: BASE_HP + HP_PER_LEVEL * self.level.saturating_sub(1) as f32,
             speed: BASE_SPEED,
             regen: 0.0,
             haste: 0.0,

@@ -67,7 +67,10 @@ pub(super) struct Loot {
 #[derive(Clone, Copy)]
 pub(super) enum GemKind {
     Xp(u32),
+    /// Health, as a share of the hero's maximum.
     Heal(f32),
+    /// A boss's chest: a free card pick, as Vampire Survivors' chests.
+    Chest,
 }
 
 #[derive(Component)]
@@ -83,6 +86,8 @@ fn look_for(kind: GemKind) -> (u32, f32) {
     match kind {
         // `TurkeyLeg.mdx`.
         GemKind::Heal(_) => (114, 2.5),
+        // `TreasureChest01.mdx`, the open world's treasure chest.
+        GemKind::Chest => (259, 1.3),
         // `BFD_WispSmallPurple.mdx`.
         GemKind::Xp(xp) if xp >= 20 => (1307, 1.0),
         // `BFD_WispSmallGreen.mdx`.
@@ -222,7 +227,9 @@ pub(super) fn spawn_enemies(
     if run.rings < due_rings {
         run.rings = due_rings;
         let def = &roster.enemies[pool[0]];
-        let n = 28 + (data::progress(elapsed) * 60.0) as usize;
+        // Small early, the full ring late: at 28 + 60 the first ring, at 45 s on Normal, closed
+        // thirty-odd foes on a level-8 hero and was the commonest early death.
+        let n = 12 + (data::progress(elapsed) * 76.0) as usize;
         for i in 0..n {
             let a = i as f32 / n as f32 * std::f32::consts::TAU;
             let pos = ground(
@@ -464,9 +471,24 @@ pub(super) fn drop_loot(
 ) {
     let mut count = gems.iter().count();
     for d in drops.read() {
-        if d.boss || rng.f32() < 0.015 {
-            let heal = GemKind::Heal(if d.boss { 1000.0 } else { 30.0 });
+        // A boss leaves a full heal and a chest; the horde, now and then, a quarter of the
+        // health pool, rarer on the harder difficulties.
+        let potion_chance = match data::difficulty() {
+            data::Difficulty::Normal => 0.015,
+            data::Difficulty::Heroic => 0.011,
+            data::Difficulty::Mythic => 0.007,
+        };
+        if d.boss || rng.f32() < potion_chance {
+            let heal = GemKind::Heal(if d.boss { 1.0 } else { 0.25 });
             spawn_gem(&mut commands, run.guid(), d.pos + Vec3::X * 0.8, heal);
+        }
+        if d.boss {
+            spawn_gem(
+                &mut commands,
+                run.guid(),
+                d.pos - Vec3::X * 0.8,
+                GemKind::Chest,
+            );
         }
         if count >= MAX_GEMS && !d.boss {
             if let Some(mut g) = gems.iter_mut().find(|g| matches!(g.kind, GemKind::Xp(_))) {
@@ -523,7 +545,12 @@ pub(super) fn collect_gems(
                     run.xp += gained;
                     super::combatlog::xp(gained);
                 }
-                GemKind::Heal(hp) => run.hp = (run.hp + hp).min(stats.max_hp),
+                GemKind::Heal(share) => run.hp = (run.hp + share * stats.max_hp).min(stats.max_hp),
+                GemKind::Chest => {
+                    run.pending_levels += 1;
+                    run.banner = Some(("A treasure chest! Choose a power.".into(), 3.0));
+                    super::combatlog::event(run.elapsed, "chest opened");
+                }
             }
             commands.entity(e).despawn();
             continue;
@@ -543,6 +570,12 @@ pub(super) fn collect_gems(
                 ));
             }
         }
+    }
+    if run.pending_levels > 0 && super::hud::build_maxed(&run) {
+        // Nothing left to pick: each level heals a fifth of the pool, and play goes on.
+        let heal = 0.2 * stats.max_hp * run.pending_levels as f32;
+        run.hp = (run.hp + heal).min(stats.max_hp);
+        run.pending_levels = 0;
     }
     if run.pending_levels > 0 {
         next.set(Phase::LevelUp);
