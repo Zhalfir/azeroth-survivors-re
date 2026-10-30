@@ -172,3 +172,21 @@ Findings:
 
 Changes: while the final boss stands, the horde refills only to a third of the cap; health per
 level 2.5 (was 1.5); the live meter updates in place.
+
+## Round 6 — Heroic, 17 talent points + T1 (Elwynn Forest)
+
+The power a full Normal clear gives: on paper ×1.51 damage and ×1.10 health (+31% Might, +10%
+haste, +5% crit, +10% health), against Heroic's ×1.7 enemy health, ×1.4 damage, ×1.15 crowd and
+a 15-minute run.
+
+| Class | Result | Level | Final boss |
+|---|---|---|---|
+| Warrior | **Victory, 17:23** | 154 | 119k health, 2:23 |
+| Mage | **Victory, 17:47** | 206 | 2:47 |
+| Priest | **Victory, 17:50** | 137 | 2:50 |
+| Hunter | died at 13:11, four bosses | 140 | — |
+
+Three of four. The auto-player plays below a decent person, so Heroic's *first* zone sits on the
+easy side of "about half of Normal's clearers". The zones' rosters climb with their level ranges
+(Elwynn 1-10 … Naxxramas 53-61), so a later zone is the real read; if the middle of the Heroic
+pass is still this kind, Heroic's multipliers go up.
