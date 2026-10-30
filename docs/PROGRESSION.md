@@ -28,6 +28,12 @@ from **talents** and **gear**; there are no character levels.
   - **boss mechanics** on final bosses (knockbacks, adds, fire zones).
 - **Endless:** a completed map/difficulty can be replayed with no end; enemies keep scaling with
   time. No new talent point.
+- **Limit Break in Endless**, as in Vampire Survivors: once every ability is at its normal maximum,
+  each further level raises one past its cap (damage, area, projectiles, cooldown) in small
+  steps with no ceiling, so the build keeps pace with the enemies' unbounded scaling.
+- **No card screen once there is nothing left to pick:** a maxed build's level-ups apply their
+  Limit Break (or, outside Endless, a small heal) without stopping play. Seen on the tablet: a
+  level-112 hero with every ability at rank 8 paused for a card every few seconds.
 
 ## Unlock order
 
