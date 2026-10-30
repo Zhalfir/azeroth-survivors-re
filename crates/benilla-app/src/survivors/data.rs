@@ -1349,28 +1349,32 @@ impl Difficulty {
         }
     }
 
-    /// Enemy health, damage and crowd size against Normal's.
+    /// Enemy health, damage and crowd size against Normal's. With 17 talent points and T1 the
+    /// auto-player won Heroic's first zone three times in four at ×1.7/×1.4/×1.15, and with 34
+    /// and T2 it won Mythic's at ×2.6/×1.9/×1.3 twice in two, the final boss down in under
+    /// three minutes: a run's own growth (levels, cards) multiplies with the talents', so the
+    /// steps must be steeper than the talents alone suggest (balance rounds 6-7, 2026-10-31).
     fn health(self) -> f32 {
         match self {
             Difficulty::Normal => 1.0,
-            Difficulty::Heroic => 1.7,
-            Difficulty::Mythic => 2.6,
+            Difficulty::Heroic => 2.1,
+            Difficulty::Mythic => 3.8,
         }
     }
 
     pub(crate) fn damage(self) -> f32 {
         match self {
             Difficulty::Normal => 1.0,
-            Difficulty::Heroic => 1.4,
-            Difficulty::Mythic => 1.9,
+            Difficulty::Heroic => 1.6,
+            Difficulty::Mythic => 2.5,
         }
     }
 
     fn crowd(self) -> f32 {
         match self {
             Difficulty::Normal => 1.0,
-            Difficulty::Heroic => 1.15,
-            Difficulty::Mythic => 1.3,
+            Difficulty::Heroic => 1.2,
+            Difficulty::Mythic => 1.4,
         }
     }
 
