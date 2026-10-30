@@ -7,6 +7,7 @@ use bevy::prelude::*;
 
 use super::hud::{HudFont, UiAction};
 use super::meter::{save_setting, MeterSetting};
+use super::units::DamageNumbers;
 use super::Phase;
 use crate::cvars::Cvars;
 
@@ -36,6 +37,7 @@ enum SettingsButton {
     Volume(&'static str, f32),
     Toggle(&'static str),
     Meter,
+    Numbers,
     Back,
 }
 
@@ -45,9 +47,11 @@ enum Readout {
     Volume(&'static str),
     Toggle(&'static str),
     Meter,
+    Numbers,
 }
 
 pub(super) fn plugin(app: &mut App) {
+    DamageNumbers::load();
     app.init_resource::<SettingsOpen>()
         .add_systems(Update, (open_close, press, show, readouts).chain())
         .add_systems(OnExit(Phase::Paused), |mut open: ResMut<SettingsOpen>| {
@@ -203,6 +207,29 @@ fn spawn_panel(commands: &mut Commands, font: &Handle<Font>) {
                 );
             });
             root.spawn(Node {
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: Val::Px(310.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|c| {
+                    c.spawn(text(font, "Damage numbers", 18.0, Color::WHITE));
+                });
+                button(
+                    row,
+                    SettingsButton::Numbers,
+                    70.0,
+                    (text(font, "", 16.0, Color::WHITE), Readout::Numbers),
+                );
+            });
+            root.spawn(Node {
                 height: Val::Px(8.0),
                 ..default()
             });
@@ -262,6 +289,9 @@ fn press(
                 meter.live = !meter.live;
                 save_setting(&meter);
             }
+            SettingsButton::Numbers => {
+                DamageNumbers::cycle();
+            }
             SettingsButton::Back => open.0 = false,
         }
     }
@@ -304,6 +334,7 @@ fn readouts(
             Readout::Volume(cvar) => format!("{:.0}%", volume(&cvars, cvar) * 100.0),
             Readout::Toggle(cvar) => on_off(switch(&cvars, cvar)),
             Readout::Meter => on_off(meter.live),
+            Readout::Numbers => DamageNumbers::current().name().to_string(),
         };
         if text.0 != want {
             text.0 = want;

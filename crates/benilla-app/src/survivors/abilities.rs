@@ -538,6 +538,9 @@ pub(super) fn cast_abilities(
                 }
             }
         };
+        if fired {
+            super::combatlog::cast(def.spell);
+        }
         run.abilities[i].cd = if fired { p.cooldown } else { 0.2 };
     }
 }
@@ -733,6 +736,7 @@ pub(super) fn apply_hits(
                 boss: en.boss,
             });
             run.kills += 1;
+            super::combatlog::killed(en.def.name);
             if en.boss {
                 super::combatlog::event(
                     run.elapsed,
@@ -769,6 +773,7 @@ pub(super) fn apply_hits(
         if dmg > 0.0 {
             en.hp -= dmg;
             run.record(h.source, dmg);
+            super::combatlog::dealt(h.source, dmg, h.crit);
             fx.number(e, dmg, h.crit, h.color);
             if let Effect::Drain(frac) = h.effect {
                 let max = run.stats().max_hp;
@@ -826,6 +831,7 @@ pub(super) fn apply_hits(
                 d.tick += 1.0;
                 dealt += d.dps;
                 run.record(d.source, d.dps);
+                super::combatlog::dealt(d.source, d.dps, false);
             }
         }
         en.dots.retain(|d| d.left > 0.0);

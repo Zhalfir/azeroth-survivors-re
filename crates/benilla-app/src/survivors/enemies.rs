@@ -106,6 +106,7 @@ fn spawn_enemy(
     boss: bool,
     final_boss: bool,
 ) {
+    super::combatlog::spawned(def.name);
     let scale = data::hp_scale(run.elapsed)
         * if final_boss {
             data::FINAL_BOSS_HEALTH
@@ -402,7 +403,7 @@ pub(super) fn move_enemies(
             let raw = e.damage * e.weaken;
             let hp_before = run.hp;
             let taken = hero::hurt_hero(&mut run, raw);
-            super::combatlog::hurt(e.def.name, taken, hp_before);
+            super::combatlog::hurt(e.def.name, taken, hp_before, e.boss, run.elapsed);
             fx.swing(ent, hero_e, taken);
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);
@@ -517,7 +518,11 @@ pub(super) fn collect_gems(
         }
         if dist < 0.9 {
             match g.kind {
-                GemKind::Xp(xp) => run.xp += xp as f32 * data::XP_RATE * stats.growth,
+                GemKind::Xp(xp) => {
+                    let gained = xp as f32 * data::XP_RATE * stats.growth;
+                    run.xp += gained;
+                    super::combatlog::xp(gained);
+                }
                 GemKind::Heal(hp) => run.hp = (run.hp + hp).min(stats.max_hp),
             }
             commands.entity(e).despawn();

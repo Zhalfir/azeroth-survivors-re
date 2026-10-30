@@ -359,6 +359,14 @@ impl Fx<'_> {
 
     /// A floating number over `anchor`, 0xAARRGGBB.
     pub fn number(&mut self, anchor: Entity, amount: f32, crit: bool, color: u32) {
+        // The Settings panel's "Damage numbers" filters only the damage the hero deals; what hurts
+        // or heals the hero always shows.
+        let dealt = color != COLOR_HURT && color != COLOR_HEAL;
+        match DamageNumbers::current() {
+            DamageNumbers::Crits if dealt && !crit => return,
+            DamageNumbers::Off if dealt => return,
+            _ => {}
+        }
         let shown = amount.round().max(1.0) as i64;
         self.text.write(CombatTextSpawn {
             anchor,
@@ -366,6 +374,66 @@ impl Fx<'_> {
             category: if crit { 2 } else { 0 },
             color: Some(color),
         });
+    }
+}
+
+/// Which of the hero's damage numbers float up: all, the critical hits, or none. A setting
+/// (`super::settings`), kept in `benilla-config/numbers.txt`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum DamageNumbers {
+    All,
+    Crits,
+    Off,
+}
+
+static DAMAGE_NUMBERS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+impl DamageNumbers {
+    pub(super) fn current() -> Self {
+        match DAMAGE_NUMBERS.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => Self::Crits,
+            2 => Self::Off,
+            _ => Self::All,
+        }
+    }
+
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Crits => "Crits",
+            Self::Off => "Off",
+        }
+    }
+
+    fn path() -> Option<std::path::PathBuf> {
+        crate::local_state::home().map(|h| h.join("numbers.txt"))
+    }
+
+    /// The saved choice into force; at startup.
+    pub(super) fn load() {
+        let saved = Self::path()
+            .and_then(|p| crate::local_state::read_to_string(&p).ok())
+            .map(|s| s.trim().to_ascii_lowercase());
+        let mode = match saved.as_deref() {
+            Some("crits") => Self::Crits,
+            Some("off") => Self::Off,
+            _ => Self::All,
+        };
+        DAMAGE_NUMBERS.store(mode as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// All → Crits → Off → All, saved.
+    pub(super) fn cycle() -> Self {
+        let next = match Self::current() {
+            Self::All => Self::Crits,
+            Self::Crits => Self::Off,
+            Self::Off => Self::All,
+        };
+        DAMAGE_NUMBERS.store(next as u8, std::sync::atomic::Ordering::Relaxed);
+        if let Some(path) = Self::path() {
+            let _ = crate::local_state::write_atomic(&path, next.name());
+        }
+        next
     }
 }
 

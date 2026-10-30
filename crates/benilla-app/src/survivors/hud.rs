@@ -976,6 +976,14 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     });
     run.hp = run.stats().max_hp;
     run.version += 1;
+    super::combatlog::begin(
+        class.name,
+        crate::char_select::race_name(race),
+        selection.map_def().name,
+        selection.difficulty.name(),
+        selection.character,
+        data::run_secs(),
+    );
     super::combatlog::event(
         0.0,
         format!(
