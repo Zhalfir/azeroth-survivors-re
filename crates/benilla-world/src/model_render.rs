@@ -823,6 +823,7 @@ pub fn plugin(app: &mut App) {
     // Before `ModelVisSet`, so the authority's pick sees this frame's side, and after the fade
     // resolve. The self feather is unordered: it composes the same marker and can lag one frame
     // as the eye crosses the surface.
+    app.init_resource::<crate::model_fade::OcclusionFade>();
     app.init_resource::<FarSideTwins>().add_systems(
         Update,
         classify_water_side

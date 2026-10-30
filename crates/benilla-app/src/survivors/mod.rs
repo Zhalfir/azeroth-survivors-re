@@ -46,6 +46,9 @@ pub(crate) struct SurvivorsPlugin;
 impl Plugin for SurvivorsPlugin {
     fn build(&self, app: &mut App) {
         // Present before `OnEnter(InWorld)`, where the UI lifecycle decides not to load FrameXML.
+        // Trees stay single entities, so the camera can see through the ones over the hero
+        // (`hero::see_through`); set before the first tile assembles.
+        benilla_world::model_fade::SEE_THROUGH.store(true, std::sync::atomic::Ordering::Relaxed);
         app.insert_resource(crate::run_mode::CaptureMode)
             .add_plugins((
                 grade::plugin,
@@ -78,6 +81,8 @@ impl Plugin for SurvivorsPlugin {
                     mobility::cast_mobility,
                     hero::drive_hero,
                     hero::place_camera,
+                    hero::cutaway.after(benilla_world::view::stamp_near_clip),
+                    hero::see_through,
                 )
                     .chain()
                     .in_set(WorldStage::Input),

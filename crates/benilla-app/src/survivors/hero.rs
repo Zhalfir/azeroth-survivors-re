@@ -330,6 +330,82 @@ pub(super) fn drop_stray_buttons(
     }
 }
 
+/// How far above the hero, along the view, the locked camera's cutaway starts: nearer the lens
+/// than this, nothing draws. From straight above, a tree's canopy over the hero sits between the
+/// lens and the hero and hid the fight (Elwynn's oaks, device test 2026-10-30); the static pass
+/// draws trees in bulk, so a per-tree fade cannot reach them, but the near plane cuts them all.
+const CUTAWAY_YD: f32 = 9.0;
+
+/// The locked camera's cutaway: its projection's near plane pushed to [`CUTAWAY_YD`] short of the
+/// hero, after `benilla_world::view::stamp_near_clip` stamps the `nearclip` setting (which every
+/// other reader keeps reading). The menu's orbit and the unlocked camera keep the setting's plane.
+pub(super) fn cutaway(
+    rig: Res<CamRig>,
+    phase: Res<State<Phase>>,
+    hero: Query<&Transform, (With<Hero>, Without<WorldCamera>)>,
+    mut cams: Query<(&Transform, &mut Projection), With<WorldCamera>>,
+) {
+    let in_run = !matches!(phase.get(), Phase::Menu | Phase::GameOver);
+    if rig.mode != CamMode::Fixed || !in_run {
+        return;
+    }
+    let Ok(hero) = hero.single() else { return };
+    let head = hero.translation + Vec3::Y * 1.5;
+    for (tf, mut proj) in &mut cams {
+        let near = (tf.translation.distance(head) - CUTAWAY_YD).max(0.1);
+        let Projection::Perspective(p) = proj.as_ref() else {
+            continue;
+        };
+        if (p.near - near).abs() > 0.01 {
+            if let Projection::Perspective(p) = &mut *proj {
+                p.near = near;
+            }
+        }
+    }
+}
+
+/// What stands between the locked camera and the hero draws see-through
+/// (`benilla_world::model_fade::OcclusionFade`): trees whose bounding sphere, at [`SEE_REACH`] of
+/// its radius, crosses the line from the lens to the hero's head, at [`SEE_ALPHA`]. On the tablet
+/// this cleared Elwynn's oaks at 20 % for ~8 % of the frame rate (83 → 76 fps, 2026-10-30): the
+/// trees are entities now, outside the static pass and the merge.
+const SEE_ALPHA: f32 = 0.2;
+const SEE_REACH: f32 = 1.0;
+
+pub(super) fn see_through(
+    rig: Res<CamRig>,
+    phase: Res<State<Phase>>,
+    hero: Query<&Transform, With<Hero>>,
+    mut occlusion: ResMut<benilla_world::model_fade::OcclusionFade>,
+) {
+    let in_run = !matches!(phase.get(), Phase::Menu | Phase::GameOver);
+    let target = (rig.mode == CamMode::Fixed && in_run)
+        .then(|| hero.single().ok().map(|h| h.translation + Vec3::Y * 1.5))
+        .flatten();
+    // `WOW_SEE_ALPHA` / `WOW_SEE_REACH` (`android-env.txt` on the device) tune it without a build.
+    static TUNE: std::sync::OnceLock<(f32, f32)> = std::sync::OnceLock::new();
+    let (alpha, reach) = *TUNE.get_or_init(|| {
+        let var = |k: &str, d: f32| {
+            crate::webenv::var(k)
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(d)
+        };
+        (
+            var("WOW_SEE_ALPHA", SEE_ALPHA),
+            var("WOW_SEE_REACH", SEE_REACH),
+        )
+    });
+    let want = benilla_world::model_fade::OcclusionFade {
+        target,
+        alpha,
+        reach,
+    };
+    if *occlusion != want {
+        *occlusion = want;
+    }
+}
+}
+
 /// A slow orbit at the menu; in play, top-down until `C` unlocks it to swing and tilt.
 pub(super) fn place_camera(
     time: Res<Time<Real>>,

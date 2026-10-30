@@ -45,6 +45,8 @@ pub(super) fn apply_model_visibility(
     // Billboard card owners (a model root or a rig joint): a card is a world root, so nothing
     // else carries its owner's hide to it.
     card_owners: Query<&InheritedVisibility>,
+    // A game mode's see-through cut between the camera and one point (`OcclusionFade`).
+    occlusion: Res<crate::model_fade::OcclusionFade>,
     mut q: Query<(
         Entity,
         &ModelPart,
@@ -87,6 +89,7 @@ pub(super) fn apply_model_visibility(
         && !windows.is_changed()
         && !claim.is_changed()
         && !far_twins.is_changed()
+        && !occlusion.is_changed()
         && new_portals.is_empty()
         && owner_flips.is_empty();
     let cam_pos = cam_t.map(|t| t.translation());
@@ -158,7 +161,23 @@ pub(super) fn apply_model_visibility(
                 (Some(f), Some(c)) => {
                     let center = xf.transform_point(f.local_center);
                     let (dx, dz) = (center.x - c.x, center.z - c.z);
-                    doodad_fade_alpha(f.radius, (dx * dx + dz * dz).sqrt())
+                    let alpha = doodad_fade_alpha(f.radius, (dx * dx + dz * dz).sqrt());
+                    match occlusion.target {
+                        Some(target)
+                            if f.radius >= crate::model_fade::OCCLUDER_MIN_RADIUS
+                                && crate::model_fade::segment_near(
+                                    c,
+                                    target,
+                                    center,
+                                    f.radius * occlusion.reach,
+                                ) =>
+                        {
+                            crate::model_fade::OCCLUDED_PARTS
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            alpha.min(occlusion.alpha)
+                        }
+                        _ => alpha,
+                    }
                 }
                 _ => 1.0,
             };

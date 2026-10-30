@@ -110,6 +110,18 @@ pub fn spawn_model_entities(
     };
     let kind = object.kind;
     let is_wmo = kind == ModelKind::Wmo;
+    // A large exterior doodad stays an entity when a game mode sees through occluders
+    // (`model_fade::SEE_THROUGH`): neither the static pass nor the merge may bake it.
+    let occluder = !is_wmo
+        && fade.radius >= crate::model_fade::OCCLUDER_MIN_RADIUS
+        && crate::model_fade::see_through();
+    if crate::model_fade::see_through() && !is_wmo {
+        crate::model_fade::LARGEST_RADIUS
+            .fetch_max(fade.radius.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+    if occluder {
+        crate::model_fade::OCCLUDERS_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     let mut out = Vec::with_capacity(submeshes.len());
     // The anim host serves any joint consumer: a skinned part, an emitter or a ribbon. A model of
     // billboard cards alone gets none, as the billboard system owns their transforms.
@@ -298,7 +310,7 @@ pub fn spawn_model_entities(
                 };
                 match site {
                     crate::static_gx::GxSite::Doodad { owner }
-                        if !is_wmo && class.merges() && !class.interior_prop =>
+                        if !is_wmo && class.merges() && !class.interior_prop && !occluder =>
                     {
                         let fade_seed = (!class.never_fade
                             && !crate::static_gx::fade_lane_disabled())
@@ -389,6 +401,7 @@ pub fn spawn_model_entities(
             if crate::terrain_stream::merge::merge_enabled()
                 && !shared_geometry[batch_idx]
                 && class.merges()
+                && !occluder
                 // Faders merge only under `WOW_MERGE_FADERS=1`: a fader blob's depth write hides
                 // the per-entity faders behind its translucent pixels.
                 && (class.never_fade

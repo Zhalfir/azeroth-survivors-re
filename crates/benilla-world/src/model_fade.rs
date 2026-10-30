@@ -26,6 +26,59 @@ pub struct DoodadFade {
     pub(crate) blend: Handle<WowModelMaterial>,
 }
 
+/// A see-through cut for a game mode that watches one point from above (benilla's own; the
+/// reference has none): a doodad of at least [`OCCLUDER_MIN_RADIUS`] whose bounding sphere, scaled
+/// by `reach`, crosses the segment from the camera to `target` draws at no more than `alpha`.
+/// `target: None`, the default, changes nothing. `apply_model_visibility` reads it; the retained
+/// static pass draws its placements in bulk and never sees it.
+#[derive(Resource, Clone, Copy, PartialEq, Debug)]
+pub struct OcclusionFade {
+    pub target: Option<Vec3>,
+    pub alpha: f32,
+    pub reach: f32,
+}
+
+impl Default for OcclusionFade {
+    fn default() -> Self {
+        Self {
+            target: None,
+            alpha: 1.0,
+            reach: 1.0,
+        }
+    }
+}
+
+/// Doodads smaller than this (yd) never occlude: fences, crates, rocks and grass stay solid. Trees
+/// are larger; they are also the ones the far fade never touches ([`NEVER_FADE_RADIUS`]).
+pub const OCCLUDER_MIN_RADIUS: f32 = 6.0;
+
+/// Set by a game mode that uses [`OcclusionFade`]: exterior doodads of [`OCCLUDER_MIN_RADIUS`] and
+/// more then stay single entities (neither the retained static pass nor the merge bakes them), so
+/// the fade can reach them. Off, the default, everything batches as before.
+pub static SEE_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Diagnostics: submeshes kept as occluder entities, and parts the fade capped this frame.
+pub static OCCLUDERS_KEPT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static OCCLUDED_PARTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The largest doodad radius seen at assembly while see-through is on (bits of an `f32`).
+pub static LARGEST_RADIUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn see_through() -> bool {
+    SEE_THROUGH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Whether the segment `from`–`to` passes within `radius` of `center`.
+pub fn segment_near(from: Vec3, to: Vec3, center: Vec3, radius: f32) -> bool {
+    let seg = to - from;
+    let len2 = seg.length_squared();
+    let t = if len2 > 0.0 {
+        ((center - from).dot(seg) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (from + seg * t).distance_squared(center) <= radius * radius
+}
+
 /// Above this bounding radius (yd) a doodad never distance-fades; only the far clip drops it.
 pub const NEVER_FADE_RADIUS: f32 = 7.0;
 
