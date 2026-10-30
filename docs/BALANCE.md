@@ -82,3 +82,55 @@ Changes (built 2026-10-31, to be measured in round 2):
 - Regular bosses drop a chest: a free card.
 - A maxed build banks its levels as heals without a card screen.
 - Final boss (earlier, 2026-10-30): no time scaling on its damage, ×0.75, a blow every 1.4 s.
+
+## Round 2 — regeneration and gentler first rings (stopped after 4 classes)
+
+| Class | Survived (round 1 → 2) | Level | Killed by |
+|---|---|---|---|
+| Hunter | 0:52 → 1:47 | 16 | Defias Thug (constant contact, ~10 damage/s against 0.4 regeneration) |
+| Druid | 0:52 → 5:18 | 26 | Forest Spider |
+| Priest | 0:51 → **11:19** | 91 | Defias Bandit, after the bell |
+| Shaman | 0:50 → 1:45 | 13 | Mangy Wolf (single-target kit, 70-145 damage/s against a crowd of 40-50) |
+
+Findings:
+
+1. **A ring after the bell** spawned 93 enemies on top of 220 alive (rings ignored the cap); eight
+   Defias Bandit blows took the Priest from a full 510 to 43 in a second.
+2. **The final boss**, slower than the hero, stood 23-36 yd off at 100% for 40 s: it could be
+   outrun for the whole fight, and spells that pick the nearest target never reached it.
+3. The early crowd still drowned single-target starters.
+
+Changes: no rings once the final boss stands, rings at most 70 and within the cap + 40; the
+final boss at least 6.3 pace and ×2 health (was ×3); the crowd eased in (10 + 225·p^1.3: ~29 alive
+at 1:30 on Normal, was 48; the same cap at the end); the auto-player faces the final boss above
+40% health.
+
+## Round 3 (stopped after 3 classes)
+
+| Class | Survived (r1 → r2 → r3) | Level | Bosses | Killed by |
+|---|---|---|---|---|
+| Hunter | 0:52 → 1:47 → **8:51** | 108 | all five regular bosses | a dozen late blows, 588 → 0 in 2 s |
+| Druid | 0:52 → 5:18 → 3:48 | 29 | 2 | a ring at 3:45, 124 → 13 in 3 s |
+| Shaman | 0:50 → 1:45 → 2:22 | 16 | 1 | the ring at 2:15 |
+
+Findings: **rings are the weaker classes' killer** (a closing wall a single-target kit cannot
+break), and **late, being caught once is death** even at 590 health (blows of 40-60, ×12). At
+16-18 fps, which is where the late game runs on the tablet, reacting in time is harder still: the
+frame rate is part of the balance.
+
+Changes: ring enemies spawn at half health; horde damage ×1.35 at the bell on Normal (Heroic and
+Mythic keep their multipliers on top).
+
+## Performance notes (2026-10-31)
+
+- **Pipeline cache** (`third_party/bevy_render`): upstream Bevy never gives wgpu a pipeline cache,
+  so the tablet recompiled every pipeline on every launch; the warm pass timed out at 10 s with
+  pipelines pending, and the rest compiled live in combat (a run dipped to 11 fps at 3:00 with 76
+  alive). With the cache: 1.3 MB, 1,601 pipelines; the warm pass drains all 2,061 variants in
+  ~6 s, nothing compiles live. The warm pass is now limited by its own pacing (24 a frame), not by
+  compiling: a faster reveal on a warm cache would shorten loading.
+- **Late game** runs at 16-30 fps median (Paladin's Consecration and Hunter's Volley the
+  heaviest): 150-220 enemies and their spell visuals. Next: measure the Medium and Low presets,
+  and profile what costs most per enemy.
+- **The first card screen** stalled (2 fps for a second): the survivors UI's pipelines (cards,
+  gradients, shadows) are not in the warm pass. To check with the cache in place.
