@@ -123,6 +123,56 @@
 - [ ] **Step 4:** Confirm `apply_camera_shake` runs after `hero::place_camera` in survivors (otherwise the camera placement overwrites the offset); add the ordering if not.
 - [ ] **Step 5:** Tests pass, APK builds, commit `Feedback: screen shake for big hits and boss kills, with a setting`.
 
+### Task A7: Demo button on the main menu; Play is always the player's own run
+
+Requested by the user on 2026-10-31: "add a demo button (that is your bot) and the normal mode is my test; now it just starts the bot automatically".
+
+Why the bot starts by itself today: `scripts/balance/run_batch.sh` (and the working copy `/Volumes/AzerothBuild/balance/run_batch2.sh`) push `android-env.txt` with `WOW_SURVIVORS_AUTO=<class>` to the tablet's app folder and delete it only on the script's last line. Batches that were killed or lost the device never reached that line, so the file stayed and every launch reads it (`survivors/auto.rs` `from_env()`).
+
+**Files:**
+- Modify: `crates/benilla-app/src/survivors/auto.rs` (a constructor for a demo run beside `from_env`)
+- Modify: the survivors main menu (find where the Play/Start button is built — `survivors/menu.rs` and/or `survivors/hud.rs`; `UiAction` is in `hud.rs:163`) to add a **Demo** button in the same WoW button style as its neighbours
+- Modify: the HUD to show a small "Demo" label while a demo run plays
+- Modify: `scripts/balance/run_batch.sh` and `/Volumes/AzerothBuild/balance/run_batch2.sh`: `trap` on EXIT/INT/TERM that removes `android-env.txt` from the device (keep the existing final `rm`; the trap makes it unconditional)
+
+**Interfaces:**
+- Produces: `pub(super) fn for_demo(class: usize, map: usize) -> Auto` in `auto.rs`, the same defaults as `from_env` with Normal difficulty, no `idle/all/late`, no screenshots.
+- Consumes: the menu's current class and map selection (`super::Selection` / the selected character), and whatever starts a run today (`hud::start_run` or the Play button's handler).
+
+**Behaviour:**
+- Play: never inserts `Auto` (only `WOW_SURVIVORS_AUTO` in the environment can, as today, for the balance batches).
+- Demo: inserts `Auto::for_demo(<selected class>, <selected map>)` and starts the run exactly as Play does. The demo uses the selected class and map, Normal difficulty.
+- A demo run records nothing for the character: no completions, talents or records (the existing `record_completion` / records paths already skip when `Auto` exists — verify, don't duplicate).
+- Leaving a demo run to the main menu (pause → Main Menu, or the run ending) removes the `Auto` resource, so the next Play is the player's own. The env-driven batch run (`from_env`) is unchanged.
+
+- [ ] **Step 1: Tests:** `auto::tests::demo_defaults` — `for_demo(2, 1)` has class 2, map 1, `Difficulty::Normal`, `idle == all == late == false`, no shots dir. A test for the menu-exit cleanup if the cleanup is a plain function you can call on a `World` (Bevy 0.18 `World::new()` + `insert_resource` + run the system once); if it is not reasonably testable, say so in the report and describe the manual check instead.
+- [ ] **Step 2:** Run → FAIL.
+- [ ] **Step 3:** Implement as above. Match the existing button code (look at how Play/Resume/Settings are spawned and handled); touch targets work through `survivors/touch.rs` the same way as the other menu buttons.
+- [ ] **Step 4:** Tests pass; `bash -n` on both scripts; APK builds.
+- [ ] **Step 5:** Commit `Menu: a Demo button runs the bot; Play is always yours`.
+
+### Task A8: README — thanks, what this fork is, the Android build, the new modes, screenshots
+
+Requested by the user on 2026-10-31: "update the readme file, saying thank you to the original creators, and explaining what we are doing, android build, new modes, put some screenshots".
+
+This fork is `Zhalfir/azeroth-survivors-re`, branch `android` (this branch, `mobile-graphics`, merges into it). It is a personal, sideloaded, experimental project — say so plainly; it is not distributed and it ships no game data.
+
+**Files:**
+- Modify: `README.md` (keep the existing top banner, the "Not an original project" note and the existing sections that still hold; add, don't rewrite history)
+- Create: `docs/screenshots/android/*.jpg` (new images)
+
+**Content to add (plain, friendly English; the user is not a native speaker, so short sentences):**
+1. **Thank you** section near the top: Aethus (the original *Azeroth Survivors*, wow.aethus.pl), the `azeroth-survivors-re` authors this was forked from (check `git log` / `git remote -v` / the existing README for the exact upstream name and link — OutThisLife/azeroth-survivors-re), samwhosung's `benilla` client and the `wenilla` fork (links already in the README / AGENTS.md), and Blizzard for World of Warcraft (data not included; you need your own 1.12.1 client data).
+2. **What this fork does:** the native Android build (NativeActivity, no Gradle; touch controls; WoW-style buttons; app icon; graphics presets High/Medium/Low; persistent shader cache), and how to build and sideload it — from `crates/survivors-android/android/build-apk.sh` and `install.sh` (read both; list prerequisites: Rust + cargo-ndk, Android SDK/NDK, JDK 17; where the WoW `Data/` goes on the device: `/sdcard/Android/data/local.azeroth.survivors/files/Data`).
+3. **New modes and systems** — read `docs/PROGRESSION.md` and `docs/BALANCE.md` and summarise only what is built: characters (up to 8), Normal / Heroic / Mythic passes, talents earned per map (51), tier sets with stats, records page, chests and potions, damage meter, combat log, settings (graphics, sound, damage numbers), the Demo button (bot) vs Play, balance work with the auto-player. Mark planned items (co-op, raids, legendaries, iPhone) as "planned", not done.
+4. **Screenshots:** pick 6–8 good ones from `/Volumes/AzerothBuild/*.png` (look at them with the Read tool; prefer the `*s.png` already-scaled ones; cover: menu/character pick, combat with a horde, a boss, level-up cards, talents, settings or records). Convert to JPEG, long side 1600 px, quality ~80: `sips -s format jpeg -s formatOptions 80 -Z 1600 in.png --out docs/screenshots/android/<name>.jpg`. Keep each under ~400 KB. Lay them out in a 2-column table like the existing README does, with descriptive `alt` text.
+5. A short **Status / roadmap** line linking `docs/superpowers/plans/2026-10-31-mobile-graphics.md`.
+
+- [ ] **Step 1:** Draft the sections; check every claim against the code or docs it comes from (no feature described that isn't built).
+- [ ] **Step 2:** Screenshots converted and placed; total added size under 3 MB.
+- [ ] **Step 3:** Render-check: no broken relative links (`grep -o 'docs/[^")]*' README.md | xargs ls`).
+- [ ] **Step 4:** Commit `README: thanks, the Android build, new modes, screenshots`.
+
 ---
 
 ## Phase B — on the tablet (measure, then fix)
