@@ -8,6 +8,7 @@ mod abilities;
 mod auto;
 mod cards;
 mod characters;
+mod combatlog;
 mod data;
 mod enemies;
 mod fill;
@@ -51,6 +52,7 @@ impl Plugin for SurvivorsPlugin {
                 meter::plugin,
                 settings::plugin,
                 characters::plugin,
+                combatlog::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()

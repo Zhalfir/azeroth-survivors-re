@@ -43,6 +43,22 @@ from **talents** and **gear**; there are no character levels.
 - Every completion is still 1 talent point: Normal gives 16 + Molten Core = 17, Heroic 17, Mythic
   17, so a full 51-point character has cleared everything on Mythic.
 
+## Player character model and on-screen keyboard
+
+One piece of work under three wishes: WoW's own character customisation, typed names, and the tier
+armour and iconic weapons below.
+
+- **The hero becomes a player character model.** Today it is a class-trainer NPC model whose looks
+  and armour are baked in. A player model is built, as in WoW, from race and gender plus skin
+  colour, face, hair style, hair colour and facial hair (`CharSections.dbc` and friends), and is
+  dressed per slot from items. The engine is a full 1.12 client and dresses players already; how
+  much the survivors hero has to change is the first thing to check.
+- **Create screen:** WoW's own customisation arrows (skin, face, hair, hair colour, facial hair)
+  under the race and class tower.
+- **On-screen keyboard** in the glue style: Android's NativeActivity passes no text from the system
+  keyboard, so names are typed on a WoW-styled A–Z keyboard (the generated name stays as a
+  default). The same keyboard enters the arcade records' initials.
+
 ## Tier armour: cosmetic rewards per difficulty
 
 - **Every zone on Normal → Tier 1** (Molten Core sets: Arcanist, Lawbringer, Might, …),

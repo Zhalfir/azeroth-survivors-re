@@ -397,10 +397,17 @@ pub(super) fn place_camera(
     }
 }
 
+/// `WOW_SURVIVORS_GOD=1`: the hero takes no damage. A test lever, so an unattended run
+/// (`super::auto`) reaches the final boss and the victory path behind it.
+fn god_mode() -> bool {
+    static GOD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *GOD.get_or_init(|| crate::webenv::var("WOW_SURVIVORS_GOD").as_deref() == Some("1"))
+}
+
 /// Damage the hero takes from one blow, after immunity, armour and the shield; returns what got
 /// through.
 pub(super) fn hurt_hero(run: &mut Run, raw: f32) -> f32 {
-    if run.immune_t > 0.0 || run.dead_t.is_some() {
+    if run.immune_t > 0.0 || run.dead_t.is_some() || god_mode() {
         return 0.0;
     }
     let mut dmg = (raw - run.stats().armor).max(1.0);

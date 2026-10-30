@@ -1327,6 +1327,15 @@ impl Difficulty {
         }
     }
 
+    /// The zone list's mark for a completion: a sword, a skull, Death Coil's skull.
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Difficulty::Normal => "Interface\\Icons\\INV_Sword_04",
+            Difficulty::Heroic => "Interface\\Icons\\INV_Misc_Bone_HumanSkull_01",
+            Difficulty::Mythic => "Interface\\Icons\\Spell_Shadow_DeathCoil",
+        }
+    }
+
     /// The seconds to survive before the final boss comes.
     pub(crate) fn run_secs(self) -> f32 {
         match self {
@@ -1345,7 +1354,7 @@ impl Difficulty {
         }
     }
 
-    fn damage(self) -> f32 {
+    pub(crate) fn damage(self) -> f32 {
         match self {
             Difficulty::Normal => 1.0,
             Difficulty::Heroic => 1.4,
@@ -1390,6 +1399,12 @@ pub(crate) fn boss_every() -> f32 {
 
 /// The final boss's health against its regular self.
 pub(crate) const FINAL_BOSS_HEALTH: f32 = 3.0;
+/// The final boss's damage against its roster entry, before the difficulty's multiplier. It takes
+/// no time scaling: its place at the top of the zone's ladder already makes it late-game, and on
+/// top of the bell's ×1.9 it killed a level-149 hero in two blows (device test, 2026-10-30).
+pub(crate) const FINAL_BOSS_DAMAGE: f32 = 0.75;
+/// Seconds between the final boss's blows (regular bosses 1.0), slow enough to see and dodge.
+pub(crate) const FINAL_BOSS_SWING: f32 = 1.4;
 /// Experience per gem: every level of the curve comes at the run's pace.
 pub(crate) const XP_RATE: f32 = 2.0;
 

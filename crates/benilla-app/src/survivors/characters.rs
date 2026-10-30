@@ -36,6 +36,8 @@ const FILL: Color = Color::srgba(0.09, 0.09, 0.09, 0.88);
 const EDGE: Color = Color::srgba(0.8, 0.62, 0.25, 0.9);
 const BUTTON: Color = Color::srgba(0.16, 0.11, 0.04, 0.95);
 const BUTTON_HOT: Color = Color::srgba(0.34, 0.22, 0.06, 0.95);
+/// An icon's inner 86%: the outer rows are its painted bevel.
+const ICON_CROP: [f32; 4] = [0.07, 0.93, 0.07, 0.93];
 const PICKED: Color = Color::srgba(0.45, 0.3, 0.05, 0.95);
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -691,7 +693,20 @@ fn mark_zones(
             ))
             .with_children(|marks| {
                 for d in Difficulty::ALL {
-                    marks.spawn((text(&font.0, &d.name()[..1], 13.0, DIM), ZoneMark(i, d)));
+                    marks.spawn((
+                        Node {
+                            width: Val::Px(15.0),
+                            height: Val::Px(15.0),
+                            ..default()
+                        },
+                        ImageNode {
+                            color: Color::NONE,
+                            ..default()
+                        },
+                        super::hud::UiArt::crop(d.icon(), ICON_CROP),
+                        ZoneMark(i, d),
+                        Pickable::IGNORE,
+                    ));
                 }
             });
             // Over the name and the marks while the zone is locked: nothing of what is next.
@@ -723,7 +738,8 @@ fn mark_zones(
 fn refresh_labels(
     chars: Res<Characters>,
     selection: Res<Selection>,
-    mut marks: Query<(&ZoneMark, &mut TextColor)>,
+    mut marks: Query<(&ZoneMark, &mut ImageNode)>,
+    fresh: Query<(), (With<ZoneMark>, Added<super::hud::ArtDone>)>,
     mut texts: ParamSet<(
         Query<&mut Text, With<NewName>>,
         Query<&mut Text, With<DeleteLabel>>,
@@ -739,7 +755,7 @@ fn refresh_labels(
     mut label_colors: Query<&mut TextColor, Without<ZoneMark>>,
     unlocks: Res<Unlocks>,
 ) {
-    if !chars.is_changed() && !selection.is_changed() && !unlocks.is_changed() {
+    if !chars.is_changed() && !selection.is_changed() && !unlocks.is_changed() && fresh.is_empty() {
         return;
     }
     for (cover, mut node) in &mut covers {
@@ -753,11 +769,16 @@ fn refresh_labels(
         }
     }
     let active = chars.active();
-    for (mark, mut color) in &mut marks {
+    for (mark, mut image) in &mut marks {
         let done = active.is_some_and(|c| c.completed(mark.0, mark.1));
-        let want = if done { GOLD } else { DIM };
-        if color.0 != want {
-            color.0 = want;
+        // Lit once completed; until then dark and faint, the icon only a hint.
+        let want = if done {
+            Color::WHITE
+        } else {
+            Color::srgba(0.3, 0.3, 0.3, 0.55)
+        };
+        if image.color != want {
+            image.color = want;
         }
     }
     if let Ok(mut t) = texts.p0().single_mut() {
@@ -848,6 +869,20 @@ fn record_completion(
                 .completions
                 .iter()
                 .any(|(m, d)| m == map && d == difficulty.name());
+            super::combatlog::event(
+                run.elapsed,
+                format!(
+                    "completion: {} on {} for {} ({})",
+                    map,
+                    difficulty.name(),
+                    c.name,
+                    if first {
+                        "first, talent point"
+                    } else {
+                        "repeat"
+                    }
+                ),
+            );
             if first {
                 c.completions
                     .push((map.to_string(), difficulty.name().to_string()));

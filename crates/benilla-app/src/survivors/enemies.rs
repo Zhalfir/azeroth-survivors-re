@@ -135,7 +135,11 @@ fn spawn_enemy(
             hp,
             max_hp: hp,
             speed: def.speed,
-            damage: def.damage * data::damage_scale(run.elapsed),
+            damage: if final_boss {
+                def.damage * data::FINAL_BOSS_DAMAGE * data::difficulty().damage()
+            } else {
+                def.damage * data::damage_scale(run.elapsed)
+            },
             radius: radius_for(def),
             xp: def.xp,
             boss,
@@ -196,6 +200,14 @@ pub(super) fn spawn_enemies(
             hpos.y,
         );
         spawn_enemy(&mut commands, &mut run, def, pos, hpos, true, is_final);
+        super::combatlog::event(
+            elapsed,
+            format!(
+                "{} {} arrives",
+                if is_final { "FINAL BOSS" } else { "boss" },
+                def.name
+            ),
+        );
         run.bosses += 1;
         run.banner = Some(if is_final {
             (format!("{} has come. Defeat it to win!", def.name), 6.0)
@@ -380,9 +392,17 @@ pub(super) fn move_enemies(
             && e.attack_cd <= 0.0
             && !hero_down
         {
-            e.attack_cd = if e.boss { 1.0 } else { 1.3 };
+            e.attack_cd = if e.final_boss {
+                data::FINAL_BOSS_SWING
+            } else if e.boss {
+                1.0
+            } else {
+                1.3
+            };
             let raw = e.damage * e.weaken;
+            let hp_before = run.hp;
             let taken = hero::hurt_hero(&mut run, raw);
+            super::combatlog::hurt(e.def.name, taken, hp_before);
             fx.swing(ent, hero_e, taken);
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);

@@ -976,6 +976,18 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     });
     run.hp = run.stats().max_hp;
     run.version += 1;
+    super::combatlog::event(
+        0.0,
+        format!(
+            "run start: {} {} in {} on {} ({} s to the final boss), character {:?}",
+            crate::char_select::race_name(race),
+            class.name,
+            selection.map_def().name,
+            selection.difficulty.name(),
+            data::run_secs(),
+            selection.character
+        ),
+    );
     true
 }
 
@@ -1039,6 +1051,22 @@ pub(super) fn pick(
     let Some(&choice) = offer.choices.get(i) else {
         return;
     };
+    let picked = match choice {
+        Choice::NewAbility(def) => format!("new {}", def.key),
+        Choice::Upgrade(k) => format!(
+            "{} to rank {}",
+            run.abilities[k].def.key,
+            run.abilities[k].level + 1
+        ),
+        Choice::NewPassive(p) => format!("new {}", p.key),
+        Choice::UpPassive(k) => format!(
+            "{} to rank {}",
+            run.passives[k].0.key,
+            run.passives[k].1 + 1
+        ),
+        Choice::Heal => "heal".to_string(),
+    };
+    super::combatlog::event(run.elapsed, format!("level {}: {picked}", run.level));
     match choice {
         Choice::NewAbility(def) => run.abilities.push(Owned {
             def,

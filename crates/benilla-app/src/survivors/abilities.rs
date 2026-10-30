@@ -733,6 +733,17 @@ pub(super) fn apply_hits(
                 boss: en.boss,
             });
             run.kills += 1;
+            if en.boss {
+                super::combatlog::event(
+                    run.elapsed,
+                    format!(
+                        "{} {} slain ({:.0} hp)",
+                        if en.final_boss { "FINAL BOSS" } else { "boss" },
+                        en.def.name,
+                        en.max_hp
+                    ),
+                );
+            }
             if en.final_boss {
                 // The map is won; `hero::hero_vitals` closes the run on its next frame.
                 run.won = true;
