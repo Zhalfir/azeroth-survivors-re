@@ -56,6 +56,8 @@ mlua-sys = { path = "third_party/mlua-sys" }
 # kira 0.12.4, patched to compute spatial gains and the volume tween per output chunk and
 # interpolate them, not per sample frame (`third_party/kira/BENILLA.md`).
 kira = { path = "third_party/kira" }
+# bevy_render 0.18.1 with a persistent wgpu pipeline cache (`third_party/bevy_render/BENILLA.md`).
+bevy_render = { path = "third_party/bevy_render" }
 
 # Dependencies at opt-level 3 in dev: at opt-level 0, avian/parry collision drops a run to <1 fps.
 [profile.dev.package."*"]

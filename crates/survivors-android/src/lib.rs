@@ -31,6 +31,8 @@ fn main() {
             unsafe {
                 std::env::set_var("WOW_DATA", files.join("Data"));
                 std::env::set_var("BENILLA_HOME", files.join("benilla-config"));
+                // The vendored bevy_render keeps compiled pipelines here between launches.
+                std::env::set_var("BEVY_PIPELINE_CACHE_PATH", files.join("pipeline-cache.bin"));
             }
             load_env_file(&files.join("android-env.txt"));
         }

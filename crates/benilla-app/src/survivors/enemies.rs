@@ -107,6 +107,7 @@ fn radius_for(def: &EnemyDef) -> f32 {
 const RING_MAX: usize = 70;
 const RING_MARGIN: usize = 40;
 const RING_MIN: usize = 10;
+const RING_HEALTH: f32 = 0.5;
 /// The final boss's pace: near the hero's own, so it closes in. Slower, it could be outrun for
 /// the whole fight (round 2: 40 s at 100%, 23 to 36 yd away).
 const FINAL_BOSS_SPEED: f32 = 6.3;
@@ -119,9 +120,11 @@ fn spawn_enemy(
     hero: Vec3,
     boss: bool,
     final_boss: bool,
+    health: f32,
 ) {
     super::combatlog::spawned(def.name);
-    let scale = data::hp_scale(run.elapsed)
+    let scale = health
+        * data::hp_scale(run.elapsed)
         * if final_boss {
             data::FINAL_BOSS_HEALTH
         } else {
@@ -218,7 +221,7 @@ pub(super) fn spawn_enemies(
             hpos + Vec3::new(a.cos(), 0.0, a.sin()) * 30.0,
             hpos.y,
         );
-        spawn_enemy(&mut commands, &mut run, def, pos, hpos, true, is_final);
+        spawn_enemy(&mut commands, &mut run, def, pos, hpos, true, is_final, 1.0);
         super::combatlog::event(
             elapsed,
             format!(
@@ -260,7 +263,18 @@ pub(super) fn spawn_enemies(
                 hpos + Vec3::new(a.cos(), 0.0, a.sin()) * 26.0,
                 hpos.y,
             );
-            spawn_enemy(&mut commands, &mut run, def, pos, hpos, false, false);
+            // A ring is fodder: at half health any build can break a hole through it, so the
+            // danger is being caught, not an unbreakable wall (round 3: Shaman, 2:22).
+            spawn_enemy(
+                &mut commands,
+                &mut run,
+                def,
+                pos,
+                hpos,
+                false,
+                false,
+                RING_HEALTH,
+            );
         }
         run.banner = Some(("They're surrounding you!".into(), 3.0));
     }
@@ -281,7 +295,7 @@ pub(super) fn spawn_enemies(
         let a = rng.range(0.0, std::f32::consts::TAU);
         let r = rng.range(34.0, 42.0);
         let pos = ground(&world, hpos + Vec3::new(a.cos(), 0.0, a.sin()) * r, hpos.y);
-        spawn_enemy(&mut commands, &mut run, def, pos, hpos, false, false);
+        spawn_enemy(&mut commands, &mut run, def, pos, hpos, false, false, 1.0);
     }
 }
 

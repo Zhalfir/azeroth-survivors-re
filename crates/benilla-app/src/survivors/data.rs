@@ -1442,9 +1442,10 @@ pub(crate) fn hp_scale(elapsed: f32) -> f32 {
 
 /// Enemy damage grows the same way.
 pub(crate) fn damage_scale(elapsed: f32) -> f32 {
-    // ×1.6 at the bell (was ×1.9): late, a horde mob's blow of ~50 against a 320 pool ended
-    // runs that were otherwise won (tablet balance runs, 2026-10-31).
-    (1.0 + progress(elapsed) * 0.6) * difficulty().damage()
+    // ×1.35 at the bell on Normal (×1.9 at first, ×1.6 in round 2): late, a dozen horde blows of
+    // 40-60 took a 590-health Hunter from full to dead in two seconds (rounds 1-3, 2026-10-31).
+    // Heroic and Mythic keep their own multipliers on top.
+    (1.0 + progress(elapsed) * 0.35) * difficulty().damage()
 }
 
 /// The experience to go from `level` to the next: Vampire Survivors' curve, cheap early.
