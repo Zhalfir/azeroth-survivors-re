@@ -102,6 +102,15 @@ fn radius_for(def: &EnemyDef) -> f32 {
     (if def.big { 1.3 } else { 0.6 }) * def.scale
 }
 
+/// A ring's size at most, the room it may take above the alive cap, and the smallest worth
+/// closing.
+const RING_MAX: usize = 70;
+const RING_MARGIN: usize = 40;
+const RING_MIN: usize = 10;
+/// The final boss's pace: near the hero's own, so it closes in. Slower, it could be outrun for
+/// the whole fight (round 2: 40 s at 100%, 23 to 36 yd away).
+const FINAL_BOSS_SPEED: f32 = 6.3;
+
 fn spawn_enemy(
     commands: &mut Commands,
     run: &mut Run,
@@ -140,7 +149,11 @@ fn spawn_enemy(
             def,
             hp,
             max_hp: hp,
-            speed: def.speed,
+            speed: if final_boss {
+                def.speed.max(FINAL_BOSS_SPEED)
+            } else {
+                def.speed
+            },
             damage: if final_boss {
                 def.damage * data::FINAL_BOSS_DAMAGE * data::difficulty().damage()
             } else {
@@ -224,12 +237,22 @@ pub(super) fn spawn_enemies(
 
     // Half way between bosses, a closing ring of the moment's weakest.
     let due_rings = ((elapsed + data::boss_every() / 2.0) / data::boss_every()) as u32;
+    // No ring once the final boss stands: the climax is the boss. A ring adds to the horde at
+    // most up to the cap plus a margin; at 220 alive a ring of 93 after the bell killed a full
+    // 510-health Priest in one second (balance round 2, 2026-10-31).
+    let alive_now = enemies.iter().filter(|e| !e.dead).count();
+    let room = (data::target_alive(elapsed) + RING_MARGIN).saturating_sub(alive_now);
+    if run.rings < due_rings && (run.bosses > regulars || room < RING_MIN) {
+        run.rings = due_rings;
+    }
     if run.rings < due_rings {
         run.rings = due_rings;
         let def = &roster.enemies[pool[0]];
         // Small early, the full ring late: at 28 + 60 the first ring, at 45 s on Normal, closed
         // thirty-odd foes on a level-8 hero and was the commonest early death.
-        let n = 12 + (data::progress(elapsed) * 76.0) as usize;
+        let n = (12 + (data::progress(elapsed) * 76.0) as usize)
+            .min(RING_MAX)
+            .min(room);
         for i in 0..n {
             let a = i as f32 / n as f32 * std::f32::consts::TAU;
             let pos = ground(

@@ -144,6 +144,7 @@ pub(super) fn plan(
     let map = selection.map_def();
     let home = flat(super::hero::arena(map) - at);
     let edge = (home.length() / (map.leash * 0.8).max(1.0)).clamp(0.0, 1.0);
+    let hurt = auto.hp_frac < 0.4;
     let threats: Vec<(Vec3, f32)> = foes
         .iter()
         .filter(|(_, e)| !e.dead)
@@ -151,12 +152,16 @@ pub(super) fn plan(
             let d = flat(t.translation - at);
             let len = d.length();
             (len < 16.0 && len > 0.01).then(|| {
-                let weight = if e.boss { 3.0 } else { 1.0 };
+                // The final boss is the fight: faced while healthy, fled when hurt.
+                let weight = match (e.final_boss, e.boss) {
+                    (true, _) if !hurt => 0.8,
+                    (_, true) => 3.0,
+                    _ => 1.0,
+                };
                 (d / len, weight / (len - e.radius).max(0.8))
             })
         })
         .collect();
-    let hurt = auto.hp_frac < 0.4;
     let wander = {
         let a = time.elapsed_secs() * 0.35;
         Vec3::new(a.cos(), 0.0, a.sin())

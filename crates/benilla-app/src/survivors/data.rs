@@ -1397,8 +1397,10 @@ pub(crate) fn boss_every() -> f32 {
     run_secs() * 0.15
 }
 
-/// The final boss's health against its regular self.
-pub(crate) const FINAL_BOSS_HEALTH: f32 = 3.0;
+/// The final boss's health against its regular self. ×3 (105k in Elwynn) took a level-121 Mage
+/// only 35 % in 77 s, its spells spent on the 200 around it: a four-minute grind. ×2 aims at a
+/// one-and-a-half to two-and-a-half minute climax (balance round 1, 2026-10-31).
+pub(crate) const FINAL_BOSS_HEALTH: f32 = 2.0;
 /// The final boss's damage against its roster entry, before the difficulty's multiplier. It takes
 /// no time scaling: its place at the top of the zone's ladder already makes it late-game, and on
 /// top of the bell's ×1.9 it killed a level-149 hero in two blows (device test, 2026-10-30).
@@ -1427,7 +1429,10 @@ pub(crate) fn wave_pool(elapsed: f32, tiers: usize) -> [usize; 3] {
 /// How many enemies the spawner keeps alive at a point in the run.
 pub(crate) fn target_alive(elapsed: f32) -> usize {
     // The cap holds on every difficulty: past it a phone's frame time, not the fight, suffers.
-    (((14.0 + progress(elapsed) * 225.0) * difficulty().crowd()) as usize).min(220)
+    // Eased in: 10 + 225·p^1.3, about 29 alive at 1:30 on Normal (was 48) and 102 at half time
+    // (was 126), the same cap at the end. Single-target starters (Hunter, Druid, Priest, Shaman)
+    // could not keep the linear curve's early crowd off (balance rounds 1-2, 2026-10-31).
+    (((10.0 + progress(elapsed).powf(1.3) * 225.0) * difficulty().crowd()) as usize).min(220)
 }
 
 /// Enemy health grows on top of the tiers, so a late kill takes several spells.
