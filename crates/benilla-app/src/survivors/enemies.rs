@@ -108,6 +108,8 @@ const RING_MAX: usize = 70;
 const RING_MARGIN: usize = 40;
 const RING_MIN: usize = 10;
 const RING_HEALTH: f32 = 0.5;
+/// The horde's cap is divided by this while the final boss stands.
+const FINAL_CROWD_DIVISOR: usize = 3;
 /// The final boss's pace: near the hero's own, so it closes in. Slower, it could be outrun for
 /// the whole fight (round 2: 40 s at 100%, 23 to 36 yd away).
 const FINAL_BOSS_SPEED: f32 = 6.3;
@@ -286,7 +288,14 @@ pub(super) fn spawn_enemies(
     }
     spawner.timer = 0.12;
     let alive = enemies.iter().filter(|e| !e.dead).count();
-    let target = data::target_alive(elapsed);
+    // Once the final boss stands, it takes the stage: the horde is refilled only to a third, so
+    // the crowd thins as it falls. Topped up to 220, it walled the boss off: a melee Rogue took
+    // it 21% in six minutes (balance round 5).
+    let target = if run.bosses > regulars {
+        data::target_alive(elapsed) / FINAL_CROWD_DIVISOR
+    } else {
+        data::target_alive(elapsed)
+    };
     if alive >= target {
         return;
     }

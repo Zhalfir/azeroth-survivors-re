@@ -265,8 +265,10 @@ pub(super) struct Stats {
 }
 
 pub(super) const BASE_HP: f32 = 120.0;
-/// Health each hero level adds to the base pool, before Fortitude multiplies it.
-pub(super) const HP_PER_LEVEL: f32 = 1.5;
+/// Health each hero level adds to the base pool, before Fortitude multiplies it. 1.5 left a
+/// level-57 Hunter at 210-290 when the 6:00 tier (Kobold Miners 25, Murloc Streamrunners 34 a
+/// blow) arrived (balance round 5).
+pub(super) const HP_PER_LEVEL: f32 = 2.5;
 pub(super) const BASE_SPEED: f32 = 7.0;
 pub(super) const BASE_MAGNET: f32 = 4.5;
 

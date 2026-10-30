@@ -32,6 +32,12 @@ pub(super) struct MeterList;
 #[derive(Component)]
 struct LiveMeter;
 
+/// A live line's bar and its numbers, by row: updated in place between rebuilds.
+#[derive(Component)]
+struct LiveBar(usize);
+#[derive(Component)]
+struct LiveNumbers(usize);
+
 /// One meter line, worked out for display.
 struct Line {
     source: u32,
@@ -129,6 +135,7 @@ fn spawn_line(
     height: f32,
     text_size: f32,
     numbers: String,
+    slot: Option<usize>,
 ) {
     parent
         .spawn((
@@ -168,7 +175,7 @@ fn spawn_line(
                 Pickable::IGNORE,
             ))
             .with_children(|bar| {
-                bar.spawn((
+                let mut fill = bar.spawn((
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(0.0),
@@ -183,8 +190,14 @@ fn spawn_line(
                     ])),
                     Pickable::IGNORE,
                 ));
+                if let Some(i) = slot {
+                    fill.insert(LiveBar(i));
+                }
                 bar.spawn(label(font, line.name.clone(), text_size, Color::WHITE));
-                bar.spawn(label(font, numbers, text_size, Color::srgb(1.0, 0.92, 0.7)));
+                let mut n = bar.spawn(label(font, numbers, text_size, Color::srgb(1.0, 0.92, 0.7)));
+                if let Some(i) = slot {
+                    n.insert(LiveNumbers(i));
+                }
             });
         });
 }
@@ -217,7 +230,7 @@ fn fill_results(
                     line.share * 100.0,
                     compact(line.dps)
                 );
-                spawn_line(ui, &font.0, line, 24.0, 14.0, numbers);
+                spawn_line(ui, &font.0, line, 24.0, 14.0, numbers, None);
             }
         });
     }
@@ -250,7 +263,10 @@ fn refresh_live(
     run: Res<Run>,
     spells: Option<Res<crate::ui_action::Spells>>,
     font: Option<Res<HudFont>>,
-    mut panel: Query<(Entity, &mut Node), With<LiveMeter>>,
+    mut panel: Query<(Entity, &mut Node), (With<LiveMeter>, Without<LiveBar>)>,
+    mut bars: Query<(&LiveBar, &mut Node), Without<LiveMeter>>,
+    mut numbers: Query<(&LiveNumbers, &mut Text)>,
+    mut order: Local<Vec<u32>>,
 ) {
     let Ok((e, mut node)) = panel.single_mut() else {
         return;
@@ -268,11 +284,35 @@ fn refresh_live(
     *next_at = now + LIVE_EVERY;
     let Some(font) = font else { return };
     let lines = lines(&run, spells.as_deref());
+    let shown_lines = &lines[..lines.len().min(LIVE_LINES)];
+    let now_order: Vec<u32> = shown_lines.iter().map(|l| l.source).collect();
+    // The same spells in the same order: update the bars and numbers in place. A rebuild
+    // re-lays every text and re-finds every icon; twice a second it cost frames on the phone.
+    if *order == now_order {
+        for (bar, mut node) in &mut bars {
+            if let Some(line) = shown_lines.get(bar.0) {
+                let want = Val::Percent(line.bar.clamp(0.0, 1.0) * 100.0);
+                if node.width != want {
+                    node.width = want;
+                }
+            }
+        }
+        for (slot, mut text) in &mut numbers {
+            if let Some(line) = shown_lines.get(slot.0) {
+                let want = format!("{}/s", compact(line.dps));
+                if text.0 != want {
+                    text.0 = want;
+                }
+            }
+        }
+        return;
+    }
+    *order = now_order;
     commands.entity(e).despawn_related::<Children>();
     commands.entity(e).with_children(|ui| {
-        for line in lines.iter().take(LIVE_LINES) {
+        for (i, line) in shown_lines.iter().enumerate() {
             let numbers = format!("{}/s", compact(line.dps));
-            spawn_line(ui, &font.0, line, 17.0, 11.0, numbers);
+            spawn_line(ui, &font.0, line, 17.0, 11.0, numbers, Some(i));
         }
     });
 }
