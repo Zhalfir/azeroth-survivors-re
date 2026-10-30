@@ -48,6 +48,19 @@ from **talents** and **gear**; there are no character levels.
   The engine dresses players already; how much the survivors hero needs to change is to be
   checked before this is scheduled.
 
+## Iconic class weapons: a reward per difficulty
+
+- **Every zone on Normal → an iconic blue weapon** for the class, **every zone on Heroic → an
+  iconic epic**, **every zone on Mythic → a legendary**. Unlocked on the character, alongside the
+  tier armour.
+- Legendaries, matching Vanilla's own class ties: **Atiesh, Greatstaff of the Guardian** for Mage,
+  Priest, Warlock and Druid (Vanilla had a version for each of the four); **Rhok'delar, Longbow of
+  the Ancient Keepers** for Hunter; **Thunderfury, Blessed Blade of the Windseeker** for Warrior and
+  Rogue; **Sulfuras, Hand of Ragnaros** for Paladin and Shaman.
+- The blue and epic weapon per class: to choose together.
+- Open question: looks only (like the tier armour), or real gear with stats feeding the loot
+  system's Weapon slot.
+
 ## Loot
 
 - **Hardcore:** loot found in a run is kept **only if the map is completed**. Dying loses it — in
