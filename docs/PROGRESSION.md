@@ -169,6 +169,17 @@ In the pause menu, all saved between sessions:
   shields), Restoration Druid (Treants, Thorns, regeneration), Restoration Shaman (totems that heal
   the hero and strike enemies).
 
+## Later: an X Hero Siege map and local co-op
+
+A new mode after the progression is done, after Warcraft III's X Hero Siege: heroes hold a base
+against waves marching down lanes, with shops, upgrades and boss waves. Its own map and rules.
+
+- **Co-op over the local network only** (same Wi-Fi), no internet servers. One device hosts and
+  runs the simulation; the others send their inputs and draw the state it sends back. The game
+  already runs everything locally, which suits a host-authoritative model; the network layer is
+  new work, and so is the mode itself.
+- To scope once the progression and gear phases are in.
+
 ## What exists today
 
 Much of the loop is already in the game and gets reshaped rather than written:

@@ -21,7 +21,9 @@ mod menu;
 mod meter;
 mod minimap;
 mod mobility;
+mod records;
 mod settings;
+mod talents;
 #[cfg(target_os = "android")]
 mod touch;
 mod units;
@@ -56,6 +58,8 @@ impl Plugin for SurvivorsPlugin {
                 settings::plugin,
                 characters::plugin,
                 combatlog::plugin,
+                records::plugin,
+                talents::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
@@ -303,6 +307,8 @@ pub(super) struct Run {
     pub dead_t: Option<f32>,
     pub next_guid: u64,
     pub damage_done: f64,
+    /// What the character's talents and tier set add (`talents`), set as play starts.
+    pub bonus: talents::Bonus,
     /// The damage meter: per crediting spell, the damage dealt and the run time of its first hit.
     pub meter: Vec<MeterRow>,
     /// Bumped whenever abilities or passives change, so the HUD rebuilds the icon rows once.
@@ -340,6 +346,7 @@ impl Default for Run {
             next_guid: 1,
             damage_done: 0.0,
             meter: Vec::new(),
+            bonus: talents::Bonus::default(),
             version: 0,
             banner: None,
         }
@@ -396,6 +403,18 @@ impl Run {
                 Stat::Crit => s.crit += v,
             }
         }
+        // The character's talents and tier set, after the run's own passives.
+        let b = self.bonus;
+        s.might += b.might;
+        s.max_hp *= 1.0 + b.max_hp;
+        s.speed *= 1.0 + b.speed;
+        s.regen += b.regen;
+        s.haste += b.haste;
+        s.area += b.area;
+        s.magnet *= 1.0 + b.magnet;
+        s.growth += b.growth;
+        s.armor += b.armor;
+        s.crit += b.crit;
         s
     }
 

@@ -51,6 +51,9 @@ pub(super) struct Character {
     /// Maps completed, as `(map name, difficulty name)`.
     #[serde(default)]
     pub completions: Vec<(String, String)>,
+    /// Talent ranks spent, per tree and row (`super::talents`).
+    #[serde(default)]
+    pub talents: super::talents::Spent,
 }
 
 impl Character {
@@ -98,51 +101,63 @@ impl Characters {
     }
 }
 
-/// What the active character may pick, worked out from its completions.
+/// What the active character may pick, worked out from its completions. Each difficulty is a
+/// pass through the whole game: Heroic opens once every zone is completed on Normal, Mythic once
+/// every zone is on Heroic; within a difficulty the zones open in the list's order, each after
+/// the one before is completed on it. The zone list shows the locks of the difficulty selected.
 #[derive(Resource)]
 pub(super) struct Unlocks {
-    /// Per map ([`data::MAPS`] index): open, and the hardest difficulty open on it.
-    zones: Vec<Option<Difficulty>>,
+    /// Per difficulty, per map ([`data::MAPS`] index): open.
+    open: [Vec<bool>; 3],
+    /// The difficulty the zone list is showing ([`Selection::difficulty`]).
+    current: Difficulty,
 }
 
 impl Default for Unlocks {
     fn default() -> Self {
-        Self::for_character(None)
+        Self::for_character(None, Difficulty::Normal)
     }
 }
 
 impl Unlocks {
+    /// Open on the difficulty selected.
     pub fn zone(&self, map: usize) -> bool {
-        self.zones.get(map).is_some_and(Option::is_some)
+        self.zone_on(map, self.current)
     }
 
-    pub fn difficulty(&self, map: usize, d: Difficulty) -> bool {
-        self.zones
-            .get(map)
-            .copied()
-            .flatten()
-            .is_some_and(|top| d as u8 <= top as u8)
+    pub fn zone_on(&self, map: usize, d: Difficulty) -> bool {
+        self.open[d as usize].get(map).copied().unwrap_or(false)
     }
 
-    fn for_character(c: Option<&Character>) -> Self {
-        let mut zones = vec![None; data::MAPS.len()];
+    /// Whether the difficulty is open at all (its first zone is).
+    pub fn difficulty(&self, _map: usize, d: Difficulty) -> bool {
+        self.open[d as usize].iter().any(|&o| o)
+    }
+
+    fn for_character(c: Option<&Character>, current: Difficulty) -> Self {
         let done = |m: usize, d: Difficulty| c.is_some_and(|c| c.completed(m, d));
-        let mut previous_done = true;
-        for (m, ..) in menu::zone_order() {
-            if !previous_done {
-                break;
-            }
-            let top = if done(m, Difficulty::Heroic) {
-                Difficulty::Mythic
-            } else if done(m, Difficulty::Normal) {
-                Difficulty::Heroic
-            } else {
-                Difficulty::Normal
+        let order: Vec<usize> = menu::zone_order().into_iter().map(|(m, ..)| m).collect();
+        let mut open: [Vec<bool>; 3] = Default::default();
+        for d in Difficulty::ALL {
+            let mut row = vec![false; data::MAPS.len()];
+            let previous_cleared = match d {
+                Difficulty::Normal => true,
+                Difficulty::Heroic => order.iter().all(|&m| done(m, Difficulty::Normal)),
+                Difficulty::Mythic => order.iter().all(|&m| done(m, Difficulty::Heroic)),
             };
-            zones[m] = Some(top);
-            previous_done = done(m, Difficulty::Normal);
+            if previous_cleared {
+                let mut previous_done = true;
+                for &m in &order {
+                    if !previous_done {
+                        break;
+                    }
+                    row[m] = true;
+                    previous_done = done(m, d);
+                }
+            }
+            open[d as usize] = row;
         }
-        Self { zones }
+        Self { open, current }
     }
 }
 
@@ -222,7 +237,7 @@ fn save_index(chars: &Characters) {
     let _ = crate::local_state::write_atomic(&dir.join("index.txt"), &text);
 }
 
-fn save_character(c: &Character) {
+pub(super) fn save_character(c: &Character) {
     let Some(dir) = dir() else { return };
     if let Ok(text) = toml::to_string(c) {
         let _ = crate::local_state::write_atomic(&dir.join(format!("{}.toml", c.id)), &text);
@@ -527,6 +542,7 @@ fn press(
                     race,
                     sex,
                     completions: Vec::new(),
+                    talents: Default::default(),
                 };
                 save_character(&c);
                 chars.list.push(c);
@@ -823,12 +839,16 @@ fn compute_unlocks(
     chars: Res<Characters>,
     mut unlocks: ResMut<Unlocks>,
     mut selection: ResMut<Selection>,
-    mut seen: Local<Option<(Option<u32>, u32)>>,
+    mut seen: Local<Option<(Option<u32>, u32, Difficulty)>>,
 ) {
-    let key = (chars.active, chars.version);
+    if !unlocks.difficulty(selection.map, selection.difficulty) {
+        selection.difficulty = Difficulty::Normal;
+        selection.version += 1;
+    }
+    let key = (chars.active, chars.version, selection.difficulty);
     if *seen != Some(key) {
         *seen = Some(key);
-        *unlocks = Unlocks::for_character(chars.active());
+        *unlocks = Unlocks::for_character(chars.active(), selection.difficulty);
     }
     if !unlocks.zone(selection.map) {
         if let Some(m) = menu::zone_order()
@@ -840,10 +860,6 @@ fn compute_unlocks(
             selection.map = m;
             selection.version += 1;
         }
-    }
-    if !unlocks.difficulty(selection.map, selection.difficulty) {
-        selection.difficulty = Difficulty::Normal;
-        selection.version += 1;
     }
 }
 

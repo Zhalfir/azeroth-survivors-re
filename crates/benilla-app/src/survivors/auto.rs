@@ -33,6 +33,8 @@ pub(super) struct Auto {
     shot_n: u32,
     log_t: f32,
     dir: Vec3,
+    /// The hero's health fraction, for the planner's caution.
+    hp_frac: f32,
     /// The screens already captured once: the menu, the first level-ups, the results.
     seen: Vec<String>,
 }
@@ -97,6 +99,7 @@ pub(super) fn from_env() -> Option<Auto> {
         shot_n: 0,
         log_t: 0.0,
         dir: Vec3::ZERO,
+        hp_frac: 1.0,
         seen: Vec::new(),
     })
 }
@@ -106,8 +109,10 @@ pub(super) fn steer(auto: &Auto) -> Vec3 {
     auto.dir
 }
 
-/// Toward the nearest gem, pushed off by every enemy close enough to bite, drifting home when
-/// there is nothing to pick up.
+/// Where to run, scored over sixteen headings as a careful player reads the field: away from
+/// enemies (each counted by how near it is and how squarely the heading meets it; a boss triple),
+/// toward the nearest gem (less so when hurt), back toward the arena near its edge, and close to
+/// the last heading so the hero does not dither.
 pub(super) fn plan(
     time: Res<Time<Real>>,
     mut auto: ResMut<Auto>,
@@ -121,34 +126,94 @@ pub(super) fn plan(
         return;
     };
     let at = hero.translation;
-    let mut want = gems
+    let gem = gems
         .iter()
         .map(|t| flat(t.translation - at))
-        .filter(|d| d.length() < 30.0)
-        .min_by(|a, b| a.length().total_cmp(&b.length()))
-        .map_or(Vec3::ZERO, |d| d.normalize_or_zero());
-    if want == Vec3::ZERO {
+        .filter(|d| d.length() < 25.0)
+        .min_by(|a, b| a.length().total_cmp(&b.length()));
+    let map = selection.map_def();
+    let home = flat(super::hero::arena(map) - at);
+    let edge = (home.length() / (map.leash * 0.8).max(1.0)).clamp(0.0, 1.0);
+    let threats: Vec<(Vec3, f32)> = foes
+        .iter()
+        .filter(|(_, e)| !e.dead)
+        .filter_map(|(t, e)| {
+            let d = flat(t.translation - at);
+            let len = d.length();
+            (len < 16.0 && len > 0.01).then(|| {
+                let weight = if e.boss { 3.0 } else { 1.0 };
+                (d / len, weight / (len - e.radius).max(0.8))
+            })
+        })
+        .collect();
+    let hurt = auto.hp_frac < 0.4;
+    let wander = {
         let a = time.elapsed_secs() * 0.35;
-        want = Vec3::new(a.cos(), 0.0, a.sin()) * 0.5;
-        let map = selection.map_def();
-        let home = flat(super::hero::arena(map) - at);
-        if home.length() > (map.leash * 0.5).min(40.0) {
-            want += home.normalize();
+        Vec3::new(a.cos(), 0.0, a.sin())
+    };
+    let mut best = (f32::NEG_INFINITY, Vec3::ZERO);
+    for i in 0..16 {
+        let a = i as f32 / 16.0 * std::f32::consts::TAU;
+        let u = Vec3::new(a.cos(), 0.0, a.sin());
+        let danger: f32 = threats
+            .iter()
+            .map(|(dir, w)| w * u.dot(*dir).max(0.0).powi(2))
+            .sum();
+        let pull = gem.map_or(0.15 * u.dot(wander), |g| {
+            let gain = if hurt { 0.5 } else { 1.2 };
+            gain * u.dot(g.normalize_or_zero()) / (1.0 + g.length() / 12.0)
+        });
+        let homeward = if home.length() > 0.01 {
+            edge * edge * 2.0 * u.dot(home.normalize())
+        } else {
+            0.0
+        };
+        let steady = 0.25 * u.dot(auto.dir);
+        let score = pull + homeward + steady - 2.5 * danger;
+        if score > best.0 {
+            best = (score, u);
         }
     }
-    let mut away = Vec3::ZERO;
-    for (t, e) in &foes {
-        if e.dead {
-            continue;
-        }
-        let d = flat(at - t.translation);
-        let len = d.length();
-        let reach = 7.0 + e.radius;
-        if len < reach && len > 0.01 {
-            away += d / len * (reach - len) / reach * 3.0;
-        }
+    // Nothing near and nothing to fetch: stand and let the spells work.
+    auto.dir = if threats.is_empty() && gem.is_none() && edge < 0.5 {
+        Vec3::ZERO
+    } else {
+        best.1
+    };
+}
+
+/// How much a card is worth to a sensible player: a new spell while slots are free, the upgrade of
+/// whatever deals the most, the stats that keep a run alive, and the heal when it is needed.
+fn card_value(choice: &hud::Choice, run: &Run) -> f32 {
+    let hp = run.hp / run.stats().max_hp.max(1.0);
+    let share = |spell: u32| {
+        let total = run.damage_done.max(1.0);
+        run.meter
+            .iter()
+            .find(|r| r.source == spell)
+            .map_or(0.0, |r| (r.damage / total) as f32)
+    };
+    let stat = |s: data::Stat| match s {
+        data::Stat::Might => 2.2,
+        data::Stat::MaxHp => 2.0,
+        data::Stat::Haste => 1.8,
+        data::Stat::Area => 1.6,
+        data::Stat::Armor => 1.6,
+        data::Stat::Regen => 1.4,
+        data::Stat::Crit => 1.4,
+        data::Stat::Growth => 1.2,
+        data::Stat::Speed => 1.0,
+        data::Stat::Magnet => 0.9,
+    };
+    match *choice {
+        hud::Choice::NewAbility(_) if run.abilities.len() < 4 => 3.0,
+        hud::Choice::NewAbility(_) => 1.6,
+        hud::Choice::Upgrade(k) => 2.3 + 3.0 * share(run.abilities[k].def.spell),
+        hud::Choice::NewPassive(p) => stat(p.stat),
+        hud::Choice::UpPassive(k) => 0.9 * stat(run.passives[k].0.stat),
+        hud::Choice::Heal if hp < 0.35 => 4.0,
+        hud::Choice::Heal => 0.2,
     }
-    auto.dir = (want + away).normalize_or_zero();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -167,6 +232,7 @@ pub(super) fn drive(
     enemies: Query<&Enemy>,
 ) {
     let dt = time.delta_secs();
+    auto.hp_frac = run.hp / run.stats().max_hp.max(1.0);
     auto.wait += dt;
     auto.frames += 1;
     match phase.get() {
@@ -220,8 +286,13 @@ pub(super) fn drive(
                 auto.capture_once(&mut commands, format!("levelup-{}", run.level));
             }
             if auto.wait > 1.6 {
-                let n = offer.len().max(1);
-                let i = (rng.range(0.0, n as f32) as usize).min(n - 1);
+                let i = offer
+                    .choices()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| (i, card_value(c, &run) + rng.range(0.0, 0.3)))
+                    .max_by(|a, b| a.1.total_cmp(&b.1))
+                    .map_or(0, |(i, _)| i);
                 hud::pick(i, &mut run, &mut offer, &mut rng, &mut next);
                 auto.wait = 0.0;
             }
