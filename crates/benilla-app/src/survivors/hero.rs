@@ -404,7 +404,6 @@ pub(super) fn see_through(
         *occlusion = want;
     }
 }
-}
 
 /// A slow orbit at the menu; in play, top-down until `C` unlocks it to swing and tilt.
 pub(super) fn place_camera(
