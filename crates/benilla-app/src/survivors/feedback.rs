@@ -133,7 +133,7 @@ pub(super) fn scaled(tier: Tier, setting: ShakeSetting) -> f32 {
 /// they return to rest by themselves; a large one also sways sideways. Amplitudes are inches, as
 /// the DBC's are: at 1.0 a 30-inch bob, past the 7 of a giant's footfall, because the survivors
 /// camera hangs ~30 yd back where a footfall-sized shake would not read.
-fn rows(tier: Tier, scale: f32) -> impl Iterator<Item = CameraShake> {
+pub(super) fn rows(tier: Tier, scale: f32) -> impl Iterator<Item = CameraShake> {
     let bob = CameraShake {
         id: 0,
         shake_type: 1,

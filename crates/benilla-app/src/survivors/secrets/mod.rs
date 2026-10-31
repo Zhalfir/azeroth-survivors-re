@@ -13,7 +13,7 @@
 //! end and on an unlock, never per kill (and on the way back to the menu, for an abandoned run).
 //! A kill or chest that crosses a threshold unlocks mid-run.
 //!
-//! Each unlock writes one [`Revealed`], for the banner (a later task). The Secrets page is [`page`].
+//! Each unlock writes one [`Revealed`], for the banner ([`reveal`]). The Secrets page is [`page`].
 //!
 //! **Playing one.** A look is `(display, race, sex)`; a secret race's looks carry a look code,
 //! [`look_code`] (100 + its index), in the race slot, one look per display variant. Only the
@@ -27,6 +27,7 @@
 
 pub(super) mod data;
 pub(super) mod page;
+pub(super) mod reveal;
 
 use std::collections::{HashMap, HashSet};
 
@@ -488,7 +489,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, (load_once, count).chain())
         .add_systems(OnEnter(Phase::Menu), save_if_dirty)
         .add_systems(Update, fill_secret_faces)
-        .add_plugins(page::plugin);
+        .add_plugins((page::plugin, reveal::plugin));
 }
 
 /// Read the file once, on the first frame (as `characters` does, for the page's store).

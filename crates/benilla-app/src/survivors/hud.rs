@@ -915,6 +915,11 @@ pub(super) fn setup_hud(
                     });
                 }
             });
+            // The secret races this run revealed (`super::secrets::reveal`), empty when none.
+            root.spawn((
+                super::secrets::reveal::RevealedLine,
+                centered(f, "", 18.0, GOLD),
+            ));
             root.spawn((OverStats, centered(f, "", 15.0, DIM)));
             // The damage meter's breakdown (`super::meter`), filled at the end of each run.
             root.spawn((
