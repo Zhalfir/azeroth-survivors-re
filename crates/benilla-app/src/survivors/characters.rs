@@ -959,9 +959,8 @@ fn refresh_labels(
                 if node.display != display {
                     node.display = display;
                 }
-                let why = previous(d).map_or(String::new(), |p| {
-                    format!("Clear all {} zones", p.name())
-                });
+                let why =
+                    previous(d).map_or(String::new(), |p| format!("Clear all {} zones", p.name()));
                 if text.0 != why {
                     text.0 = why;
                 }

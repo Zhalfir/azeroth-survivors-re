@@ -76,7 +76,7 @@ pub(super) fn plugin(app: &mut App) {
         is_mouse_enabled: true,
     })
     .init_resource::<TouchState>()
-    .add_systems(Startup, spawn_overlay)
+    .add_systems(Startup, spawn_overlay.after(super::hud::setup_hud))
     .add_systems(PreUpdate, translate_touches.before(InputSystems))
     .add_systems(Update, show_overlay);
 }
@@ -392,7 +392,24 @@ fn circle(radius: f32, color: Color, place: impl FnOnce(&mut Node)) -> impl Bund
     )
 }
 
-fn spawn_overlay(mut commands: Commands) {
+/// A play button's key hint, as an action button shows its binding: over a bottom button, under
+/// the top one (Pause, under the minimap).
+fn hint(key: KeyCode) -> &'static str {
+    match key {
+        KeyCode::KeyF => "F",
+        KeyCode::KeyC => "C",
+        KeyCode::Escape => "Esc",
+        _ => "",
+    }
+}
+
+fn spawn_overlay(
+    mut commands: Commands,
+    font: Option<Res<super::hud::HudFont>>,
+    mut sweeps: ResMut<Assets<super::hud::SweepUiMaterial>>,
+) {
+    let Some(font) = font else { return };
+    let f = &font.0;
     let fill = Color::srgba(0.05, 0.04, 0.03, 0.35);
     commands.spawn((StickRing, circle(STICK_RADIUS, fill, |_| {})));
     commands.spawn((
@@ -424,6 +441,7 @@ fn spawn_overlay(mut commands: Commands) {
             .spawn((
                 PlayButton(key),
                 node,
+                super::detail::TextKeepOut,
                 GlobalZIndex(1000),
                 Pickable::IGNORE,
                 Visibility::Hidden,
@@ -443,6 +461,28 @@ fn spawn_overlay(mut commands: Commands) {
                     Some(path) => art.insert(super::hud::UiArt::crop(path, ICON_CROP)),
                     None => art.insert(MobilityButtonIcon),
                 };
+                // The movement spell's cooldown, as on the HUD's F slot.
+                if key == super::mobility::KEY {
+                    super::hud::mobility_cooldown(slot, &mut sweeps, f, 24.0);
+                }
+                // The key hint, clear of the slot frame's ring.
+                let mut label = Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                };
+                if from_bottom {
+                    label.bottom = Val::Px(BUTTON_SIZE + 6.0);
+                } else {
+                    label.top = Val::Px(BUTTON_SIZE + 6.0);
+                }
+                slot.spawn((label, Pickable::IGNORE)).with_children(|l| {
+                    l.spawn((
+                        super::hud::centered_bundle(f, hint(key), 16.0, Color::WHITE),
+                        Pickable::IGNORE,
+                    ));
+                });
                 // `UI-Quickslot2`: the 64×64 slot frame, its button 36 inside.
                 slot.spawn((
                     Node {

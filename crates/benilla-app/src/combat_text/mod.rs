@@ -94,11 +94,13 @@ struct WorldText {
 /// Carry (survivors): a crowd game's budget for floating text. `cap` bounds the live texts over
 /// all units (the reference bounds them per unit only); `reuse_layout` lays a text's glyphs out
 /// once per size and moves them after, instead of laying the same string out every frame. The
-/// client never inserts it, so every text is admitted and laid out as before.
+/// client never inserts it, so every text is admitted and laid out as before. `keep_out` are
+/// screen rects (logical px; empty ones ignored) a text is not drawn in: the touch buttons.
 #[derive(Resource, Clone, Copy)]
 pub(crate) struct WorldTextBudget {
     pub(crate) cap: usize,
     pub(crate) reuse_layout: bool,
+    pub(crate) keep_out: [Rect; 4],
 }
 
 /// What the global cap does with a new text: admit it, evict a live one first, or drop it.
@@ -308,6 +310,15 @@ pub(crate) fn float_combat_text(
             culled.push(i); // behind the camera or off the viewport
             continue;
         };
+        // Carry (survivors): a number seated on a button is dropped like one off the viewport.
+        if budget.is_some_and(|b| {
+            b.keep_out
+                .iter()
+                .any(|r| !r.is_empty() && r.contains(screen))
+        }) {
+            culled.push(i);
+            continue;
+        }
         // Constant with distance: the worldtext path has no depth term.
         let size_value = scale_value(t.category, life);
         let target_px = text_px(size_value, viewport);
@@ -595,6 +606,7 @@ mod tests {
         app.insert_resource(WorldTextBudget {
             cap: 3,
             reuse_layout: true,
+            keep_out: [Rect::EMPTY; 4],
         });
         app.add_message::<CombatTextSpawn>();
         app.add_systems(Update, float_combat_text);

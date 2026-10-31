@@ -56,8 +56,53 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(WorldTextBudget {
             cap: TEXT_CAP,
             reuse_layout: true,
+            keep_out: [Rect::EMPTY; 4],
         })
-        .add_systems(Update, (crowd_decals, crowd_anim_lod, room_focus, card_rays));
+        .add_systems(
+            Update,
+            (
+                crowd_decals,
+                crowd_anim_lod,
+                room_focus,
+                card_rays,
+                text_keep_out,
+            ),
+        );
+}
+
+/// A button floating numbers keep off: the HUD's F slot and the touch play buttons.
+#[derive(Component)]
+pub(super) struct TextKeepOut;
+
+/// How far past a button's edge, in logical px, a number's seat point is still kept off: the
+/// number's ink rises above its seat.
+const KEEP_OUT_MARGIN: f32 = 24.0;
+
+/// Each frame, the shown [`TextKeepOut`] buttons' screen rects into [`WorldTextBudget::keep_out`].
+fn text_keep_out(
+    mut budget: ResMut<WorldTextBudget>,
+    buttons: Query<
+        (
+            &bevy::ui::ComputedNode,
+            &bevy::ui::UiGlobalTransform,
+            &InheritedVisibility,
+        ),
+        With<TextKeepOut>,
+    >,
+    window: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let k = 1.0 / window.single().map_or(1.0, |w| w.scale_factor()).max(0.01);
+    let mut rects = [Rect::EMPTY; 4];
+    let shown = buttons
+        .iter()
+        .filter(|(node, _, vis)| vis.get() && node.size().x > 0.0);
+    for (slot, (node, tf, _)) in rects.iter_mut().zip(shown) {
+        *slot =
+            Rect::from_center_size(tf.translation * k, node.size() * k).inflate(KEEP_OUT_MARGIN);
+    }
+    if budget.keep_out != rects {
+        budget.keep_out = rects;
+    }
 }
 
 /// Whether ordinary enemies keep their shadow and footprints: only on High. Off Android there is

@@ -33,6 +33,8 @@ pub(super) const SAFE_BOTTOM: f32 = 36.0;
 /// The XP bar's foot: over the gesture bar's handle (a line ~10 dp up), not the whole band; it
 /// takes no taps.
 const XP_BOTTOM: f32 = 12.0;
+/// The XP bar's height: the reference's 13 and a little more, to read on a tablet.
+const XP_H: f32 = 17.0;
 /// The smallest secondary text, in UI units: 13 units is 18 px on a 1080-line screen.
 pub(super) const TEXT_FLOOR: f32 = 13.0;
 
@@ -113,6 +115,45 @@ pub(super) struct MobilitySlot;
 pub(super) struct MobilityIcon;
 #[derive(Component)]
 pub(super) struct MobilitySweep(Handle<SweepUiMaterial>);
+/// The whole seconds left on the mobility spell's cooldown, over its sweep.
+#[derive(Component)]
+pub(super) struct MobilityCd;
+
+/// A mobility button's cooldown: the radial sweep and the seconds over it, as an action button
+/// shows them. Both the HUD's F slot and the touch button carry one ([`refresh_mobility`]).
+pub(super) fn mobility_cooldown(
+    slot: &mut ChildSpawnerCommands,
+    mats: &mut Assets<SweepUiMaterial>,
+    font: &Handle<Font>,
+    size: f32,
+) {
+    let handle = mats.add(SweepUiMaterial { sweep: 0.0 });
+    slot.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+        MaterialNode(handle.clone()),
+        MobilitySweep(handle),
+        Pickable::IGNORE,
+    ));
+    slot.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        Pickable::IGNORE,
+    ))
+    .with_children(|n| {
+        n.spawn((MobilityCd, centered(font, "", size, Color::WHITE)));
+    });
+}
 #[derive(Component)]
 pub(super) struct OverTitle;
 #[derive(Component)]
@@ -356,7 +397,7 @@ pub(super) fn setup_hud(
                     bottom: Val::Px(XP_BOTTOM),
                     margin: UiRect::left(Val::Px(-512.0)),
                     width: Val::Px(1024.0),
-                    height: Val::Px(13.0),
+                    height: Val::Px(XP_H),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
@@ -389,7 +430,7 @@ pub(super) fn setup_hud(
                             left: Val::Px(256.0 * i as f32),
                             top: Val::Px(0.0),
                             width: Val::Px(256.0),
-                            height: Val::Px(10.0),
+                            height: Val::Px(XP_H - 3.0),
                             ..default()
                         },
                         ImageNode {
@@ -457,6 +498,7 @@ pub(super) fn setup_hud(
                     },
                     Interaction::default(),
                     TipFor::Mobility,
+                    super::detail::TextKeepOut,
                 ))
                 .with_children(|slot| {
                     // `UI-Quickslot2` is the empty slot's 64×64 frame, the button 36 inside it.
@@ -487,17 +529,7 @@ pub(super) fn setup_hud(
                             ..default()
                         },
                     ));
-                    let handle = sweeps_init.add(SweepUiMaterial { sweep: 0.0 });
-                    slot.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        MaterialNode(handle.clone()),
-                        MobilitySweep(handle),
-                    ));
+                    mobility_cooldown(slot, &mut sweeps_init, f, 18.0);
                 });
             });
             root.spawn(Node {
@@ -1577,6 +1609,7 @@ pub(super) fn refresh_mobility(
     mut slot: Query<&mut Node, With<MobilitySlot>>,
     icon: Query<(Entity, Option<&SpellIcon>), With<MobilityIcon>>,
     sweep: Query<&MobilitySweep>,
+    mut seconds: Query<&mut Text, With<MobilityCd>>,
     mut mats: ResMut<Assets<SweepUiMaterial>>,
 ) {
     let def = run.mobility();
@@ -1600,12 +1633,22 @@ pub(super) fn refresh_mobility(
                 .insert(SpellIcon(def.spell));
         }
     }
-    if let Ok(s) = sweep.single() {
-        let f = (run.mobile.cd / def.cooldown.max(0.01)).clamp(0.0, 1.0);
-        if let Some(m) = mats.get_mut(&s.0) {
-            if m.sweep != f {
+    let f = (run.mobile.cd / def.cooldown.max(0.01)).clamp(0.0, 1.0);
+    for s in &sweep {
+        if mats.get(&s.0).is_some_and(|m| m.sweep != f) {
+            if let Some(m) = mats.get_mut(&s.0) {
                 m.sweep = f;
             }
+        }
+    }
+    let left = if run.mobile.cd > 0.05 {
+        format!("{}", run.mobile.cd.ceil() as u32)
+    } else {
+        String::new()
+    };
+    for mut t in &mut seconds {
+        if t.0 != left {
+            t.0 = left.clone();
         }
     }
 }
@@ -1668,6 +1711,11 @@ pub(super) fn apply_ui_scale(
 const PLATE_FEET_GAP: f32 = 0.004;
 /// A couple of screen pixels lower than the gap alone sets it.
 const PLATE_NUDGE: f32 = 2.0;
+/// The hero's plate against an enemy's: half again as large, so it reads in a crowd on a tablet
+/// (the diagonal basis damps a large screen's plates).
+const HERO_PLATE_SCALE: f32 = 1.5;
+/// The level in the plate's seat never drops under this, in UI units.
+const HERO_LEVEL_MIN: f32 = TEXT_FLOOR + 2.0;
 
 /// The hero's nameplate under its feet, sized from the screen diagonal as [`crate::vplates`]
 /// sizes a plate, outside the UI scale. The border's top half seats a name the hero has none of,
@@ -1710,7 +1758,7 @@ pub(super) fn hero_plate(
     *vis = Visibility::Inherited;
     let s = ui_scale.0;
     let basis = plate_basis(viewport);
-    let gx = |v: f32| gx_px(v, basis) / s;
+    let gx = |v: f32| gx_px(v, basis) / s * HERO_PLATE_SCALE;
     let (pw, ph) = (gx(PLATE_W), gx(PLATE_H));
     let bar_top = ph - gx(BAR_OFF_Y) - gx(BAR_H);
     frame.width = Val::Px(pw);
@@ -1745,7 +1793,7 @@ pub(super) fn hero_plate(
         if text.0 != n {
             text.0 = n;
         }
-        let size = text_px(LEVEL_H, basis) / s;
+        let size = (text_px(LEVEL_H, basis) / s * HERO_PLATE_SCALE).max(HERO_LEVEL_MIN);
         if font.font_size != size {
             font.font_size = size;
         }

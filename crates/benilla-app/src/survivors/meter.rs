@@ -13,6 +13,11 @@ const RESULTS_LINES: usize = 8;
 const LIVE_LINES: usize = 5;
 /// The live meter redraws this often, in real seconds.
 const LIVE_EVERY: f32 = 0.5;
+/// The live meter's line height, text size and width, in UI units: its text at the HUD's floor
+/// and a step over, to read on a tablet (it was 17 / 11 / 210).
+const LIVE_LINE_H: f32 = 21.0;
+const LIVE_TEXT: f32 = super::hud::TEXT_FLOOR + 1.0;
+const LIVE_W: f32 = 250.0;
 
 const BAR_TOP: Color = Color::srgba(0.75, 0.52, 0.12, 0.9);
 const BAR_BOTTOM: Color = Color::srgba(0.42, 0.24, 0.04, 0.9);
@@ -243,7 +248,7 @@ fn spawn_live(mut commands: Commands) {
             position_type: PositionType::Absolute,
             left: Val::Px(10.0),
             top: Val::Px(110.0),
-            width: Val::Px(210.0),
+            width: Val::Px(LIVE_W),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(2.0),
             display: Display::None,
@@ -312,7 +317,7 @@ fn refresh_live(
     commands.entity(e).with_children(|ui| {
         for (i, line) in shown_lines.iter().enumerate() {
             let numbers = format!("{}/s", compact(line.dps));
-            spawn_line(ui, &font.0, line, 17.0, 11.0, numbers, Some(i));
+            spawn_line(ui, &font.0, line, LIVE_LINE_H, LIVE_TEXT, numbers, Some(i));
         }
     });
 }

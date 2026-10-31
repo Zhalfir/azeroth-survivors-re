@@ -193,11 +193,7 @@ fn button(
         });
 }
 
-fn spawn_ui(
-    mut commands: Commands,
-    font: Option<Res<HudFont>>,
-    slots: Query<(Entity, &LeftSlot)>,
-) {
+fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(Entity, &LeftSlot)>) {
     let Some(font) = font else { return };
     let f = &font.0;
     // The initials prompt, over the results.

@@ -528,15 +528,31 @@ pub(super) fn tick_marks(
     }
 }
 
-/// Corpses fade once their death has played.
+/// A corpse's hold before it fades: its death's 2.5 s while few lie about, shorter as they pile
+/// up, so a crowd's bodies do not hide the live enemies around the hero.
+const CORPSE_HOLD: f32 = 2.5;
+const CORPSE_HOLD_MIN: f32 = 0.6;
+/// The corpses at once the full hold is kept for.
+const CORPSES_CALM: usize = 12;
+
+fn corpse_hold(corpses: usize) -> f32 {
+    if corpses <= CORPSES_CALM {
+        CORPSE_HOLD
+    } else {
+        (CORPSE_HOLD * CORPSES_CALM as f32 / corpses as f32).max(CORPSE_HOLD_MIN)
+    }
+}
+
+/// Corpses fade once their death has played, sooner in a crowd ([`corpse_hold`]).
 pub(super) fn reap_dead(
     mut commands: Commands,
     time: Res<Time>,
     mut dying: Query<(Entity, &mut Dying)>,
 ) {
+    let hold = corpse_hold(dying.iter().len());
     for (e, mut d) in &mut dying {
         d.0 += time.delta_secs();
-        if d.0 > 2.5 {
+        if d.0 > hold {
             commands
                 .entity(e)
                 .remove::<Dying>()
@@ -691,6 +707,16 @@ pub(super) fn still_gems(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A few corpses keep their whole death; a pile fades sooner, never instantly.
+    #[test]
+    fn corpses_fade_sooner_in_a_crowd() {
+        assert_eq!(corpse_hold(0), CORPSE_HOLD);
+        assert_eq!(corpse_hold(CORPSES_CALM), CORPSE_HOLD);
+        assert!(corpse_hold(24) < CORPSE_HOLD);
+        assert!(corpse_hold(24) > corpse_hold(48));
+        assert_eq!(corpse_hold(500), CORPSE_HOLD_MIN);
+    }
 
     #[test]
     fn fill_grid_reuses() {
