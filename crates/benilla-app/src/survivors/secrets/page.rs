@@ -231,7 +231,7 @@ fn button(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, action: PageBu
 fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(Entity, &LeftSlot)>) {
     let Some(font) = font else { return };
     let f = &font.0;
-    // Over the menu (Records 120, Talents 125), the whole screen; the Back row stays above the
+    // Over the menu screen (410) and Talents (455), the whole screen; the Back row stays above the
     // gesture band.
     commands
         .spawn((
@@ -253,7 +253,8 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(En
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.94)),
-            GlobalZIndex(130),
+            // Over the menu screen (410), so its zone list and buttons never show through.
+            GlobalZIndex(455),
         ))
         .with_children(|root| {
             root.spawn((text(f, "", 28.0, GOLD), PageTitle));
@@ -376,8 +377,11 @@ fn show(
         Query<&mut Node, With<OpenButton>>,
     )>,
     mut label: Query<(&mut Text, &mut TextColor), With<OpenLabel>>,
+    selection: Res<crate::survivors::Selection>,
 ) {
     let menu = *phase.get() == Phase::Menu;
+    // Create Character has no opener; the page stays reachable from the character list.
+    let listing = selection.character.is_some();
     if !menu && page.open {
         page.open = false;
     }
@@ -391,7 +395,7 @@ fn show(
         set(n, menu && page.open);
     }
     for n in &mut nodes.p1() {
-        set(n, menu && !page.open);
+        set(n, menu && listing && !page.open);
     }
     // The opener says when something new waits behind it.
     if progress.is_changed() {

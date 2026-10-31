@@ -2186,7 +2186,7 @@ fn stat_label(stat: Stat) -> &'static str {
     }
 }
 
-fn passive_text(stat: Stat, v: f32) -> String {
+pub(super) fn passive_text(stat: Stat, v: f32) -> String {
     match stat {
         Stat::Might => format!("Increases all damage you deal by {}.", pct(v)),
         Stat::MaxHp => format!("Increases your maximum health by {}.", pct(v)),

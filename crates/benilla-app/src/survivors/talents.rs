@@ -439,7 +439,8 @@ fn spawn_page(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.94)),
-            GlobalZIndex(125),
+            // Over the menu screen (410), so its zone list and buttons never show through.
+            GlobalZIndex(455),
         ))
         .with_child((
             PageBody,
@@ -587,7 +588,7 @@ fn rebuild(
                 let total = tree_total(&c.talents[t]);
                 cols.spawn((
                     Node {
-                        width: Val::Px(250.0),
+                        width: Val::Px(312.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(6.0),
                         padding: UiRect::all(Val::Px(10.0)),
@@ -602,6 +603,14 @@ fn rebuild(
                     col.spawn(text(f, format!("{tree} ({total})"), 20.0, GOLD));
                     let talents = rows(*focus);
                     for r in 0..5 {
+                        let effect = if r < 4 {
+                            let t = &talents[r];
+                            let s = super::hud::passive_text(t.stat, t.per_rank);
+                            format!("{} per rank.", s.trim_end_matches('.'))
+                        } else {
+                            let (stat, v) = capstone_stat(*focus);
+                            super::hud::passive_text(stat, v)
+                        };
                         let (name, spell, max) = if r < 4 {
                             (talents[r].name, talents[r].spell, ROW_RANKS[r])
                         } else {
@@ -621,7 +630,7 @@ fn rebuild(
                         } else {
                             DIM.with_alpha(0.4)
                         };
-                        col.spawn(button_bundle(TalentButton::Add(t, r), 228.0, 46.0, edge))
+                        col.spawn(button_bundle(TalentButton::Add(t, r), 290.0, 84.0, edge))
                         .with_children(|b| {
                             b.spawn((
                                 Node {
@@ -639,7 +648,8 @@ fn rebuild(
                             ));
                             b.spawn((
                                 Node {
-                                    flex_grow: 1.0,
+                                    // A fixed width so the effect line wraps inside the button.
+                                    width: Val::Px(232.0),
                                     flex_direction: FlexDirection::Column,
                                     ..default()
                                 },
@@ -657,6 +667,12 @@ fn rebuild(
                                     format!("{have}/{max}"),
                                     13.0,
                                     if addable { GREEN } else { DIM },
+                                ));
+                                tx.spawn(text(
+                                    f,
+                                    effect.clone(),
+                                    13.0,
+                                    if open { Color::srgb(0.85, 0.8, 0.65) } else { DIM },
                                 ));
                             });
                         });
