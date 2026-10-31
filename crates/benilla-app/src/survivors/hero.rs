@@ -41,9 +41,10 @@ const ZOOM_MIN: f32 = 1.5;
 const ZOOM_MAX: f32 = 70.0;
 
 /// Whether the camera is locked; `C` toggles it.
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(super) enum CamMode {
-    /// Locked top-down (58°), laptop-friendly — the original feel.
+    /// Locked at whatever view it was left at: top-down (61°) by default, laptop-friendly — the
+    /// original feel.
     #[default]
     Fixed,
     /// Unlocked: a mouse drag swings and tilts it around the hero.
@@ -71,6 +72,21 @@ impl Default for CamRig {
             mode: CamMode::Fixed,
         }
     }
+}
+
+/// Lock or unlock the camera, keeping its view.
+fn toggle_lock(rig: &mut CamRig) {
+    rig.mode = match rig.mode {
+        CamMode::Fixed => CamMode::Orbit,
+        CamMode::Orbit => CamMode::Fixed,
+    };
+}
+
+/// A screen-space move (`x` right, `z` down the screen) turned into the world, for a camera at
+/// `yaw`: "up" on the stick or W is always up the screen.
+fn move_dir(input: Vec3, yaw: f32) -> Vec3 {
+    let (sy, cy) = yaw.sin_cos();
+    Vec3::new(input.x * cy + input.z * sy, 0.0, input.z * cy - input.x * sy)
 }
 
 /// Where a battleground's runs start.
@@ -220,11 +236,9 @@ pub(super) fn drive_hero(
                 if keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]) {
                     dir.x += 1.0;
                 }
-                // In orbit mode WASD is camera-relative; in fixed mode it stays world-relative.
-                if rig.mode == CamMode::Orbit {
-                    let (sy, cy) = rig.yaw.sin_cos();
-                    dir = Vec3::new(dir.x * cy + dir.z * sy, 0.0, dir.z * cy - dir.x * sy);
-                }
+                // Camera-relative in both modes: a view locked at an angle keeps "up" up the
+                // screen. At the default view (yaw 0) this is the old world-relative WASD.
+                dir = move_dir(dir, rig.yaw);
             }
             let mut pos = tf.translation;
             // Locked, the hero faces the cursor and WASD moves him under it, so he backpedals and
@@ -419,17 +433,18 @@ pub(super) fn place_camera(
     hero: Query<&Transform, (With<Hero>, Without<WorldCamera>)>,
     mut cams: Query<&mut Transform, With<WorldCamera>>,
 ) {
-    // `C` unlocks the camera to swing and tilt; locking it again snaps back to the top-down view,
-    // so world-relative WASD lines up with the screen again.
+    // `C` (or the touch camera button, which presses it) unlocks the camera to swing and tilt;
+    // locking it again keeps the view the player set. It used to snap back to top-down so
+    // world-relative WASD lined up with the screen; movement follows the camera now
+    // ([`move_dir`]), and the user asked for the view to stay (tablet feedback, 2026-10-31).
     if keys.just_pressed(KeyCode::KeyC) {
-        rig.mode = match rig.mode {
-            CamMode::Fixed => CamMode::Orbit,
-            CamMode::Orbit => {
-                rig.yaw = 0.0;
-                rig.pitch = FIXED_PITCH;
-                CamMode::Fixed
-            }
-        };
+        toggle_lock(&mut rig);
+    }
+    // Every run starts from the default view; the menu's own orbit ignores yaw and pitch.
+    if *phase.get() == Phase::Menu {
+        rig.yaw = 0.0;
+        rig.pitch = FIXED_PITCH;
+        rig.mode = CamMode::Fixed;
     }
     // With no hero yet, the focus `drive_hero` grounded.
     let focus = hero.single().map_or(player.pos, |t| t.translation);
@@ -605,6 +620,30 @@ pub(super) fn reach(hero: Vec3, other: Vec3) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locking_keeps_the_view() {
+        let mut rig = CamRig {
+            yaw: 1.2,
+            pitch: 0.9,
+            mode: CamMode::Orbit,
+            ..default()
+        };
+        toggle_lock(&mut rig);
+        assert_eq!((rig.mode, rig.yaw, rig.pitch), (CamMode::Fixed, 1.2, 0.9));
+        toggle_lock(&mut rig);
+        assert_eq!((rig.mode, rig.yaw, rig.pitch), (CamMode::Orbit, 1.2, 0.9));
+    }
+
+    #[test]
+    fn movement_follows_the_camera() {
+        let up = Vec3::new(0.0, 0.0, -1.0);
+        // The default view: exactly the old world-relative W.
+        assert!(move_dir(up, 0.0).abs_diff_eq(up, 1e-6));
+        // A quarter turn rotates it the way the orbit mode always has.
+        let turned = move_dir(up, std::f32::consts::FRAC_PI_2);
+        assert!(turned.abs_diff_eq(Vec3::new(-1.0, 0.0, 0.0), 1e-6), "{turned}");
+    }
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::{CursorLeft, WindowFocused};
 
