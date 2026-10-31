@@ -309,6 +309,35 @@ pub(super) fn spawn_enemies(
     }
 }
 
+/// The separation grid's cell edge, in yards.
+const CELL: f32 = 3.0;
+
+/// The grid cell a position falls in.
+fn cell_of(p: Vec3) -> (i32, i32) {
+    ((p.x / CELL).floor() as i32, (p.z / CELL).floor() as i32)
+}
+
+/// [`move_enemies`]' per-frame buffers, kept between frames so the chase allocates nothing once
+/// warm (the `performance-optimization` reuse-buffers fix; 2026-10-31).
+#[derive(Default)]
+pub(super) struct Separation {
+    bodies: Vec<(Entity, Vec3, f32)>,
+    grid: HashMap<(i32, i32), Vec<usize>>,
+    push: HashMap<Entity, Vec3>,
+}
+
+/// Rebuild `grid` from `positions` (indexed in order), reusing its cells' storage: cells are
+/// emptied, not dropped, and cells left empty are removed so stale ones are never visited.
+fn fill_grid(grid: &mut HashMap<(i32, i32), Vec<usize>>, positions: impl Iterator<Item = Vec3>) {
+    for cell in grid.values_mut() {
+        cell.clear();
+    }
+    for (i, p) in positions.enumerate() {
+        grid.entry(cell_of(p)).or_default().push(i);
+    }
+    grid.retain(|_, cell| !cell.is_empty());
+}
+
 /// The chase: straight at the hero, pushed apart from each other, stopped by crowd control, and
 /// swinging when in reach.
 #[allow(clippy::type_complexity)]
@@ -320,6 +349,7 @@ pub(super) fn move_enemies(
     mut enemies: Query<(Entity, &mut Transform, &mut Enemy, &mut MovementState), Without<Hero>>,
     mut fx: Fx,
     mut hits: MessageWriter<Hit>,
+    mut scratch: Local<Separation>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -331,19 +361,19 @@ pub(super) fn move_enemies(
     let hpos = htf.translation;
     let hero_down = run.dead_t.is_some();
 
-    // Separation over a coarse grid: only neighbours in the same or adjacent cells push.
-    const CELL: f32 = 3.0;
-    let bodies: Vec<(Entity, Vec3, f32)> = enemies
-        .iter()
-        .filter(|(_, _, e, _)| !e.dead)
-        .map(|(ent, tf, e, _)| (ent, tf.translation, e.radius))
-        .collect();
-    let key = |p: Vec3| ((p.x / CELL).floor() as i32, (p.z / CELL).floor() as i32);
-    let mut grid: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
-    for (i, b) in bodies.iter().enumerate() {
-        grid.entry(key(b.1)).or_default().push(i);
-    }
-    let mut push: HashMap<Entity, Vec3> = HashMap::with_capacity(bodies.len());
+    // Separation over a coarse grid: only neighbours in the same or adjacent cells push. The
+    // buffers live across frames, so a crowd of 220 allocates nothing per frame once warm.
+    let Separation { bodies, grid, push } = &mut *scratch;
+    bodies.clear();
+    bodies.extend(
+        enemies
+            .iter()
+            .filter(|(_, _, e, _)| !e.dead)
+            .map(|(ent, tf, e, _)| (ent, tf.translation, e.radius)),
+    );
+    fill_grid(grid, bodies.iter().map(|b| b.1));
+    push.clear();
+    let key = cell_of;
     for (i, &(ent, pos, r)) in bodies.iter().enumerate() {
         let (cx, cz) = key(pos);
         let mut acc = Vec3::ZERO;
@@ -642,5 +672,26 @@ pub(super) fn still_gems(
     }
     for mut drive in &mut drives {
         drive.set_paused(true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fill_grid_reuses() {
+        let mut grid = HashMap::new();
+        let first = [Vec3::new(0.5, 0.0, 0.5), Vec3::new(1.0, 0.0, 1.0), Vec3::new(7.0, 0.0, 0.0)];
+        fill_grid(&mut grid, first.into_iter());
+        let capacity = grid.capacity();
+        let second = [Vec3::new(10.0, 0.0, 10.0), Vec3::new(0.2, 0.0, 0.2)];
+        fill_grid(&mut grid, second.into_iter());
+
+        let mut fresh = HashMap::new();
+        fill_grid(&mut fresh, second.into_iter());
+        assert_eq!(grid, fresh, "the same cells as a fresh build, old entries gone");
+        assert!(grid.capacity() >= capacity, "the map is not shrunk between frames");
+        assert_eq!(grid[&cell_of(second[1])], vec![1]);
     }
 }
