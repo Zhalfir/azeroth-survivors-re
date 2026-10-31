@@ -76,9 +76,7 @@ pub fn tuned_default_plugins(mut primary_window: Window) -> PluginGroupBuilder {
                     ..TaskPoolOptions::default().async_compute
                 },
                 compute: bevy::app::TaskPoolThreadAssignmentPolicy {
-                    on_thread_spawn: Some(std::sync::Arc::new(|| {
-                        thread_qos::promote_current_thread(thread_qos::QosClass::UserInteractive)
-                    })),
+                    on_thread_spawn: Some(std::sync::Arc::new(thread_qos::register_frame_thread)),
                     // `WOW_THREADS=1` serialises the frame's systems, a diagnostic: a defect that
                     // survives it is not a race between two systems.
                     max_threads: match std::env::var("WOW_THREADS").ok().as_deref() {

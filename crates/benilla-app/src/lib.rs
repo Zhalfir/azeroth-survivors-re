@@ -232,10 +232,14 @@ pub fn run_survivors(build: BuildId) -> AppExit {
     // The caller's thread becomes the app's main thread, the frame's critical path; on Android
     // nothing else promotes it (macOS already runs it user-interactive). See `thread_qos`.
     #[cfg(target_os = "android")]
-    benilla_world::thread_qos::promote_current_thread(
-        benilla_world::thread_qos::QosClass::UserInteractive,
-    );
+    benilla_world::thread_qos::register_frame_thread();
     launch(build, None)
+}
+
+/// Whether a panic's crash report has been written; a launcher that ends the process after a
+/// panic waits for it (the Android launcher does: a panicked process cannot relaunch).
+pub fn crash_report_done() -> bool {
+    crash::report_done()
 }
 
 /// What a crate on top of benilla adds to the built app ([`run_with`]).

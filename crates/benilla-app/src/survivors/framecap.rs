@@ -117,15 +117,15 @@ pub(super) fn plugin(app: &mut App) {
 
 /// The frame's work so far against the cap's target, to the OS's performance hints (Android
 /// ADPF, `benilla_world::thread_qos::report_frame`), before the cap's sleep so the sleep never
-/// counts as work. Uncapped aims at 60.
+/// counts as work. Uncapped has no target to hint, so nothing is reported (a made-up 60 fps
+/// target would let the OS lower clocks on a 120 Hz uncapped run).
 #[cfg(not(target_arch = "wasm32"))]
 fn hint_frame(samples: Res<super::frametime::FrameSamples>) {
-    if let Some(started) = samples.frame_started() {
-        let target = FrameCap::current()
-            .target()
-            .unwrap_or(Duration::from_secs_f64(1.0 / 60.0));
-        benilla_world::thread_qos::report_frame(started.elapsed(), target);
-    }
+    let (Some(started), Some(target)) = (samples.frame_started(), FrameCap::current().target())
+    else {
+        return;
+    };
+    benilla_world::thread_qos::report_frame(started.elapsed(), target);
 }
 
 /// Sleep out the rest of the frame: coarse `thread::sleep` to 1 ms short of the target (the OS

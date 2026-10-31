@@ -63,8 +63,10 @@ mod android {
     /// is system-only).
     const DISPLAY_NICE: i32 = -4;
 
-    /// Frame-critical thread ids seen so far, for the hint session.
-    static TIDS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+    /// The frame threads registered so far (main, render, compute workers), with a generation
+    /// that moves on every change. Audio threads promote too but never register: their work is not
+    /// the frame's, and a rebuilt output stream would leave a dead id in the session.
+    static FRAME_THREADS: Mutex<(u64, Vec<i32>)> = Mutex::new((0, Vec::new()));
 
     pub(super) fn promote(class: QosClass) {
         if class != QosClass::UserInteractive {
@@ -74,11 +76,22 @@ mod android {
         if unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, DISPLAY_NICE) } != 0 {
             warn_once!("thread priority: setpriority({DISPLAY_NICE}) refused");
         }
-        if let Ok(mut tids) = TIDS.lock() {
-            if !tids.contains(&tid) {
-                tids.push(tid);
+    }
+
+    pub(super) fn register_frame_thread() {
+        promote(QosClass::UserInteractive);
+        let tid = unsafe { libc::gettid() };
+        if let Ok(mut frame) = FRAME_THREADS.lock() {
+            if !frame.1.contains(&tid) {
+                frame.1.push(tid);
+                frame.0 += 1;
             }
         }
+    }
+
+    /// A thread id still alive in this process.
+    fn alive(tid: i32) -> bool {
+        std::path::Path::new(&format!("/proc/self/task/{tid}")).exists()
     }
 
     type GetManager = unsafe extern "C" fn() -> *mut c_void;
@@ -101,8 +114,11 @@ mod android {
     struct Session {
         api: Api,
         session: *mut c_void,
-        threads: usize,
+        /// The [`FRAME_THREADS`] generation the session was last given.
+        generation: u64,
         target_ns: i64,
+        /// Consecutive failures to (re)build the session; ADPF is given up after a few.
+        failures: u8,
     }
 
     // SAFETY: the session handle is only touched under `SESSION`'s lock; the NDK documents the
@@ -142,12 +158,8 @@ mod android {
         if work_ns <= 0 || target_ns <= 0 {
             return;
         }
-        let tids = TIDS.lock().map(|t| t.clone()).unwrap_or_default();
-        if tids.is_empty() {
-            return;
-        }
         let Ok(mut slot) = SESSION.lock() else { return };
-        // Resolve once; `Some(None)` means the device has no ADPF, so stop trying.
+        // Resolve once; `Some(None)` means no ADPF (or given up), so stop trying.
         let state = slot.get_or_insert_with(|| {
             let api = api();
             if api.is_none() {
@@ -156,31 +168,50 @@ mod android {
             api.map(|api| Session {
                 api,
                 session: std::ptr::null_mut(),
-                threads: 0,
+                generation: u64::MAX,
                 target_ns: 0,
+                failures: 0,
             })
         });
         let Some(s) = state.as_mut() else { return };
-        unsafe {
-            if s.session.is_null() || (s.threads != tids.len() && s.api.set_threads.is_none()) {
-                if !s.session.is_null() {
-                    (s.api.close)(s.session);
+        let generation = FRAME_THREADS.lock().map(|f| f.0).unwrap_or(0);
+        if s.session.is_null() || s.generation != generation {
+            // The thread set changed (or there is no session yet): copy it, drop dead ids, and
+            // hand it over, by `setThreads` when the device has it, else by a new session.
+            let tids: Vec<i32> = FRAME_THREADS
+                .lock()
+                .map(|f| f.1.iter().copied().filter(|&t| alive(t)).collect())
+                .unwrap_or_default();
+            if tids.is_empty() {
+                return;
+            }
+            let updated = !s.session.is_null()
+                && s.api.set_threads.is_some_and(|set| unsafe {
+                    set(s.session, tids.as_ptr(), tids.len()) == 0
+                });
+            if !updated {
+                unsafe {
+                    if !s.session.is_null() {
+                        (s.api.close)(s.session);
+                    }
+                    s.session =
+                        (s.api.create)(s.api.manager, tids.as_ptr(), tids.len(), target_ns);
                 }
-                s.session = (s.api.create)(s.api.manager, tids.as_ptr(), tids.len(), target_ns);
                 if s.session.is_null() {
-                    warn_once!("performance hint: createSession refused");
-                    *state = None;
+                    s.failures += 1;
+                    warn!("performance hint: createSession refused ({} of 5)", s.failures);
+                    if s.failures >= 5 {
+                        *state = None;
+                    }
                     return;
                 }
-                info!("performance hint: session over {} frame-critical threads", tids.len());
-                s.threads = tids.len();
+                info!("performance hint: session over {} frame threads", tids.len());
                 s.target_ns = target_ns;
-            } else if s.threads != tids.len() {
-                if let Some(set) = s.api.set_threads {
-                    set(s.session, tids.as_ptr(), tids.len());
-                }
-                s.threads = tids.len();
             }
+            s.failures = 0;
+            s.generation = generation;
+        }
+        unsafe {
             if s.target_ns != target_ns {
                 (s.api.target)(s.session, target_ns);
                 s.target_ns = target_ns;
@@ -190,8 +221,18 @@ mod android {
     }
 }
 
+/// Promote the calling thread as frame-critical (`UserInteractive`) and, on Android, add it to
+/// the performance-hint session's threads. For the main thread, the render thread and the compute
+/// pool's workers only; other user-interactive threads (audio) call [`promote_current_thread`].
+pub fn register_frame_thread() {
+    #[cfg(target_os = "android")]
+    android::register_frame_thread();
+    #[cfg(not(target_os = "android"))]
+    promote_current_thread(QosClass::UserInteractive);
+}
+
 /// Report one frame's actual work time and its target to the OS's performance hints (Android
-/// ADPF; a no-op elsewhere). Call once a frame from the main thread.
+/// ADPF; a no-op elsewhere). Call once a frame, from any thread.
 pub fn report_frame(work: std::time::Duration, target: std::time::Duration) {
     #[cfg(target_os = "android")]
     android::report_frame(work.as_nanos() as i64, target.as_nanos() as i64);
@@ -244,7 +285,11 @@ fn promote_render_thread(_world: &mut World) {
     }
     APPLIED.with(|p| {
         if p.get() != Some(want) {
-            promote_current_thread(want);
+            if want == QosClass::UserInteractive {
+                register_frame_thread();
+            } else {
+                promote_current_thread(want);
+            }
             debug!(
                 "thread QoS: render-schedule thread {:?} → {want:?}",
                 std::thread::current().name().unwrap_or("<unnamed>")
