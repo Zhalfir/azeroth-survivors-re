@@ -14,8 +14,10 @@
 //! - **Waits:** nothing shows over the card pick or the pause menu ([`can_show`]); a reveal that
 //!   arrives there waits for play or the results, and one already showing freezes, hidden.
 //!
-//! It sits over the boss frames' band (`super::super::bossbar`) and takes precedence there while
-//! it shows, ~3 s; on the results it rides higher, over the title. The results also list every
+//! In play it sits in the lower third, over the movement-spell slot and clear of the touch
+//! buttons: at the top it hid the clock and the boss frames (`super::super::bossbar`) for its ~3 s,
+//! and lower down the middle it would hide the hero. At the menu it sits under the top edge; on the
+//! results it rides higher, over the title. The results also list every
 //! race the run revealed ([`RevealedLine`]).
 
 use std::collections::VecDeque;
@@ -45,8 +47,11 @@ pub(super) const FANFARE: &str = "QUESTCOMPLETED";
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.0);
 const PALE_GOLD: Color = Color::srgb(1.0, 0.93, 0.7);
-/// Under the clock line, over the boss frames' first rows.
-const TOP_PLAYING: f32 = 84.0;
+/// In play, the banner's foot over the bottom centre's movement-spell slot (its frame tops out
+/// ~117 units up) and the XP bar.
+const BOTTOM_PLAYING: f32 = 140.0;
+/// At the menu, under the top edge.
+const TOP_MENU: f32 = 84.0;
 /// On the results, above the title.
 const TOP_RESULTS: f32 = 16.0;
 
@@ -69,6 +74,16 @@ pub(super) fn banner_alpha(t: f32) -> f32 {
     } else {
         let x = ((t - POP - HOLD) / FADE).clamp(0.0, 1.0);
         1.0 - x * x
+    }
+}
+
+/// Where the banner stands in `phase`, as `(top, bottom)`: in play low, clear of the clock and the
+/// boss frames at the top; on the results over the title; at the menu under the top edge.
+pub(super) fn banner_place(phase: Phase) -> (Val, Val) {
+    match phase {
+        Phase::GameOver => (Val::Px(TOP_RESULTS), Val::Auto),
+        Phase::Menu => (Val::Px(TOP_MENU), Val::Auto),
+        _ => (Val::Auto, Val::Px(BOTTOM_PLAYING)),
     }
 }
 
@@ -181,7 +196,7 @@ fn spawn_banner(mut commands: Commands, font: Option<Res<HudFont>>) {
             BannerRoot,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(TOP_PLAYING),
+                top: Val::Px(TOP_MENU),
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
                 justify_content: JustifyContent::Center,
@@ -317,13 +332,10 @@ fn draw(
             n.0 = def(race).name.to_string();
         }
     }
-    let top = Val::Px(if *phase.get() == Phase::GameOver {
-        TOP_RESULTS
-    } else {
-        TOP_PLAYING
-    });
-    if node.top != top {
+    let (top, bottom) = banner_place(*phase.get());
+    if node.top != top || node.bottom != bottom {
         node.top = top;
+        node.bottom = bottom;
     }
     let (scale, alpha) = (banner_scale(t), banner_alpha(t));
     // The hold is ~2.5 s of the same frame: rebuild the gradient and recolour only on a change.
@@ -435,6 +447,13 @@ mod tests {
         q.tick(1.0, true);
         q.tick(5.0, false);
         assert!((q.showing().unwrap().1 - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn in_play_the_banner_stands_low_clear_of_the_clock_and_boss_frames() {
+        assert_eq!(banner_place(Phase::Playing), (Val::Auto, Val::Px(BOTTOM_PLAYING)));
+        assert_eq!(banner_place(Phase::GameOver).0, Val::Px(TOP_RESULTS));
+        assert_eq!(banner_place(Phase::Menu).0, Val::Px(TOP_MENU));
     }
 
     #[test]
