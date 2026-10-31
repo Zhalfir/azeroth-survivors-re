@@ -86,6 +86,55 @@ struct WorldText {
     color: u32,
     /// The unit slot, 0-3, first free (`0x6c73f0`); seats walk slots descending (`0x6c6e00`).
     slot: u8,
+    /// Carry (survivors): the glyphs last laid out, at the origin, for [`WorldTextBudget`]'s
+    /// layout reuse: the pixel size and atlas generation they were laid out under.
+    layout: Option<(f32, u64, Vec<crate::ui_pass::UiQuad>)>,
+}
+
+/// Carry (survivors): a crowd game's budget for floating text. `cap` bounds the live texts over
+/// all units (the reference bounds them per unit only); `reuse_layout` lays a text's glyphs out
+/// once per size and moves them after, instead of laying the same string out every frame. The
+/// client never inserts it, so every text is admitted and laid out as before.
+#[derive(Resource, Clone, Copy)]
+pub(crate) struct WorldTextBudget {
+    pub(crate) cap: usize,
+    pub(crate) reuse_layout: bool,
+}
+
+/// What the global cap does with a new text: admit it, evict a live one first, or drop it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CapVerdict {
+    Admit,
+    Evict(usize),
+    Drop,
+}
+
+/// The crit number row: it outranks every other text under the cap.
+const CRIT_CATEGORY: u8 = 2;
+
+/// The global cap's choice for a new text of rank `new_rank` among `live` `(rank, born)` texts:
+/// under the cap it is admitted; at it the lowest-ranked live text goes, the oldest among equals,
+/// unless that outranks the newcomer, which is then dropped.
+fn cap_verdict(live: impl Iterator<Item = (u8, f64)>, cap: usize, new_rank: u8) -> CapVerdict {
+    let mut n = 0usize;
+    let mut victim: Option<(usize, u8, f64)> = None;
+    for (i, (rank, born)) in live.enumerate() {
+        n += 1;
+        if victim.is_none_or(|(_, r, b)| (rank, born) < (r, b)) {
+            victim = Some((i, rank, born));
+        }
+    }
+    if n < cap {
+        return CapVerdict::Admit;
+    }
+    match victim {
+        Some((i, rank, _)) if rank <= new_rank => CapVerdict::Evict(i),
+        _ => CapVerdict::Drop,
+    }
+}
+
+fn rank(category: u8) -> u8 {
+    u8::from(category == CRIT_CATEGORY)
 }
 
 /// The live texts of all units, pooled; the per-anchor slot check stands in for per-unit arrays.
@@ -147,7 +196,9 @@ pub(crate) fn float_combat_text(
     mut bucket: Local<crate::smart_rect::SmartBucket>,
     // Absent in a bare test world, which draws the default face.
     font: Option<Res<DamageTextFont>>,
+    budget: Option<Res<WorldTextBudget>>,
 ) {
+    let budget = budget.as_deref().copied();
     let now = time.elapsed_secs_f64();
     // Headless there is no camera: spawns and expiry run, nothing draws.
     let cam = camera
@@ -156,9 +207,25 @@ pub(crate) fn float_combat_text(
         .map(|(c, pose)| (c, GlobalTransform::from(*pose)));
     let viewport = cam.as_ref().and_then(|(c, _)| c.logical_viewport_size());
     for spawn in spawns.read() {
-        let Some(slot) = free_slot(&texts.0, spawn.anchor) else {
+        let Some(mut slot) = free_slot(&texts.0, spawn.anchor) else {
             continue; // the 4-slot hard drop
         };
+        // Carry (survivors): the global cap, after the reference's per-unit one.
+        if let Some(budget) = budget {
+            let live = texts.0.iter().map(|t| (rank(t.category), t.born));
+            match cap_verdict(live, budget.cap, rank(spawn.category)) {
+                CapVerdict::Admit => {}
+                CapVerdict::Drop => continue,
+                CapVerdict::Evict(i) => {
+                    texts.0.remove(i);
+                    // The evicted text may have held this unit's lower slot.
+                    let Some(s) = free_slot(&texts.0, spawn.anchor) else {
+                        continue;
+                    };
+                    slot = s;
+                }
+            }
+        }
         let Ok(tf) = transforms.get(spawn.anchor) else {
             continue; // anchor despawned before the spawn landed
         };
@@ -205,6 +272,7 @@ pub(crate) fn float_combat_text(
                 .color
                 .unwrap_or(CATEGORIES[spawn.category as usize].color),
             slot,
+            layout: None,
         });
     }
     texts
@@ -227,6 +295,8 @@ pub(crate) fn float_combat_text(
     // A rejected anchor destroys the text and frees its slot (`6c7d9d` to `6c6dda` to
     // `0x6c86a0`); reaped after the walk, which holds the list.
     let mut culled: Vec<usize> = Vec::new();
+    // Fresh layouts to keep, stored after the walk, which holds the list.
+    let mut layouts: Vec<(usize, f32, u64, Vec<crate::ui_pass::UiQuad>)> = Vec::new();
     for i in order {
         let t = &texts.0[i];
         let cat = &CATEGORIES[t.category as usize];
@@ -243,28 +313,65 @@ pub(crate) fn float_combat_text(
         let target_px = text_px(size_value, viewport);
         // Deviation: the reference stretches a raster of at most 32 px; each whole-pixel size is
         // rasterized here, so the crit pop stays crisp.
-        let mut e = atlas.lock();
-        let mut glyphs = layout_text_quads(
-            &mut e,
-            &t.text,
-            Rect::from_center_size(screen, Vec2::ZERO),
-            argb(t.color),
-            Justify {
-                h: JustifyH::Center,
-                v: JustifyV::Middle,
-            },
-            Z_WORLD_TEXT,
-            FontSpec {
-                // The bound face, not a hardcoded Friz: an addon's assignment is what draws.
-                path: font.as_ref().and_then(|f| f.0.as_deref()),
-                height: Some(target_px),
-                outline: Outline::None,
-                alpha_gradient: None,
-            },
-            // A world overlay with its own seat; the UI grid does not apply.
-            crate::ui_text::TextSeat::Exact,
-        );
-        drop(e);
+        let generation = atlas.generation;
+        let reuse = budget.is_some_and(|b| b.reuse_layout);
+        let cached = t
+            .layout
+            .as_ref()
+            .filter(|(px, gen, _)| reuse && *px == target_px && *gen == generation);
+        let mut glyphs = if let Some((_, _, quads)) = cached {
+            // Carry (survivors): the same string at the same size, moved to this frame's point.
+            quads
+                .iter()
+                .map(|q| {
+                    let mut q = q.clone();
+                    q.rect = Rect {
+                        min: q.rect.min + screen,
+                        max: q.rect.max + screen,
+                    };
+                    q
+                })
+                .collect()
+        } else {
+            let mut e = atlas.lock();
+            let at = if reuse { Vec2::ZERO } else { screen };
+            let glyphs = layout_text_quads(
+                &mut e,
+                &t.text,
+                Rect::from_center_size(at, Vec2::ZERO),
+                argb(t.color),
+                Justify {
+                    h: JustifyH::Center,
+                    v: JustifyV::Middle,
+                },
+                Z_WORLD_TEXT,
+                FontSpec {
+                    // The bound face, not a hardcoded Friz: an addon's assignment is what draws.
+                    path: font.as_ref().and_then(|f| f.0.as_deref()),
+                    height: Some(target_px),
+                    outline: Outline::None,
+                    alpha_gradient: None,
+                },
+                // A world overlay with its own seat; the UI grid does not apply.
+                crate::ui_text::TextSeat::Exact,
+            );
+            drop(e);
+            if reuse {
+                layouts.push((i, target_px, generation, glyphs.clone()));
+                glyphs
+                    .into_iter()
+                    .map(|mut q| {
+                        q.rect = Rect {
+                            min: q.rect.min + screen,
+                            max: q.rect.max + screen,
+                        };
+                        q
+                    })
+                    .collect()
+            } else {
+                glyphs
+            }
+        };
         let (alpha_text, alpha_shadow) = fade_alpha(cat, elapsed_ms);
         let mut bounds: Option<Rect> = None;
         for q in &mut glyphs {
@@ -315,6 +422,9 @@ pub(crate) fn float_combat_text(
             }));
         }
         quads.overlays.append(&mut glyphs);
+    }
+    for (i, px, generation, quads) in layouts {
+        texts.0[i].layout = Some((px, generation, quads));
     }
     // Freeing the slot is the point: an unseen number would otherwise hold one of the unit's 4.
     drop_indices(&mut texts.0, culled);
@@ -460,6 +570,55 @@ impl Plugin for CombatTextPlugin {
 mod tests {
     use super::law::COLOR_SPELL_GOLD;
     use super::*;
+
+    /// Under the cap all are admitted; at it the oldest plain number goes before any crit, and a
+    /// plain newcomer facing only crits is the one dropped.
+    #[test]
+    fn the_global_cap_drops_the_oldest_smallest_first() {
+        let live = [(0u8, 3.0f64), (1, 1.0), (0, 2.0), (1, 0.5)];
+        assert_eq!(cap_verdict(live.into_iter(), 5, 0), CapVerdict::Admit);
+        assert_eq!(cap_verdict(live.into_iter(), 4, 0), CapVerdict::Evict(2));
+        assert_eq!(cap_verdict(live.into_iter(), 4, 1), CapVerdict::Evict(2));
+        let crits = [(1u8, 1.0f64), (1, 0.5)];
+        assert_eq!(cap_verdict(crits.into_iter(), 2, 0), CapVerdict::Drop);
+        assert_eq!(cap_verdict(crits.into_iter(), 2, 1), CapVerdict::Evict(1));
+        assert_eq!(cap_verdict(std::iter::empty(), 0, 1), CapVerdict::Drop);
+    }
+
+    /// With the budget inserted, a burst over many units keeps at most `cap` texts alive.
+    #[test]
+    fn a_budget_caps_live_texts_across_units() {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        app.init_resource::<UiQuads>();
+        app.init_resource::<WorldTexts>();
+        app.insert_resource(WorldTextBudget {
+            cap: 3,
+            reuse_layout: true,
+        });
+        app.add_message::<CombatTextSpawn>();
+        app.add_systems(Update, float_combat_text);
+        for i in 0..10 {
+            let unit = app.world_mut().spawn(Transform::default()).id();
+            app.world_mut().write_message(CombatTextSpawn {
+                anchor: unit,
+                text: format!("{i}"),
+                category: if i == 0 { CRIT_CATEGORY } else { 0 },
+                color: None,
+            });
+        }
+        app.update();
+        let texts = &app.world().resource::<WorldTexts>().0;
+        assert_eq!(texts.len(), 3);
+        assert!(
+            texts.iter().any(|t| t.category == CRIT_CATEGORY),
+            "the crit outranks the plain numbers and stays"
+        );
+        assert!(
+            texts.iter().any(|t| t.text == "9"),
+            "the newest plain number is in"
+        );
+    }
 
     /// Headless, and with no attachment on the bare entities the anchor is the feet, so the
     /// snapshot is exactly `z − 1/3`.

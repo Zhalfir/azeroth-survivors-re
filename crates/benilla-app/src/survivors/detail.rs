@@ -1,7 +1,8 @@
 //! The horde's per-enemy detail: what each survivors enemy costs the engine besides its body.
 //! The engine pays per unit for a blob shadow, footprints, footstep lookups, pose evaluation,
-//! event keys and room rays; at 220 enemies on a tablet that is the frame. The enemies opt out
-//! through the engine's own markers and budgets; the hero and the bosses keep their full detail.
+//! event keys, room rays and floating numbers; at 220 enemies on a tablet that is the frame. The
+//! enemies opt out through the engine's own markers and budgets; the hero and the bosses keep
+//! their full detail.
 
 use benilla_world::rig_anim::AnimHalfRate;
 use benilla_world::view::WorldCamera;
@@ -11,6 +12,7 @@ use bevy::prelude::*;
 use super::enemies::Enemy;
 use super::hero::Hero;
 use crate::blob_shadow::{NoUnitShadow, ShadowReproject};
+use crate::combat_text::WorldTextBudget;
 use crate::creature_anim::AnimEventsMuted;
 use crate::footprints::NoFootprints;
 use crate::sound::footsteps::FootstepHearing;
@@ -45,9 +47,16 @@ const MUTE_EXIT: f32 = 16.0;
 /// reach within this of the hero may hold one, so their room rays run.
 const ROOM_FOCUS_RADIUS: f32 = 80.0;
 
+/// The live floating texts over every unit at once: a 100-enemy nova would otherwise float 100.
+const TEXT_CAP: usize = 24;
+
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(SHADOW_SLIDE)
         .insert_resource(FootstepHearing(HEARING))
+        .insert_resource(WorldTextBudget {
+            cap: TEXT_CAP,
+            reuse_layout: true,
+        })
         .add_systems(Update, (crowd_decals, crowd_anim_lod, room_focus));
 }
 
