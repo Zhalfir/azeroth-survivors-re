@@ -49,7 +49,7 @@ Give the survivors mode Vampire Survivors-style secrets: hidden playable races y
 | Quillboar | Warrior, Hunter, Shaman | creature | clear The Barrens and Durotar | "The thorns remember who walked the Razorfen." |
 | Felguard | Warrior, Warlock | creature | win a Mythic run as a Warlock | "Command the Legion at its hardest, and it will kneel." |
 | Centaur | Warrior, Hunter | creature | win a run in The Barrens without ever standing still more than 3 seconds | "The Kolkar respect only those who never stop running." |
-| Imp | Warlock, Mage | creature | kill the final boss within 60 seconds of its arrival | "Faster, master, faster! Eight minutes is too long!" |
+| Imp | Warlock, Mage | creature | kill the final boss within 60 seconds of its arrival | "Faster, master, faster! One minute is all the big one gets!" |
 
 Paladin stays limited to Human and Dwarf, plus the Skeleton as the one dark exception (user's choice: "Skeleton paladin is cool"). Creatures without cast animations play the attack swing for spells.
 
