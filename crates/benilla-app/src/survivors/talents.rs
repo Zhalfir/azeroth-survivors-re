@@ -16,7 +16,7 @@
 
 use bevy::prelude::*;
 
-use super::characters::Characters;
+use super::characters::{Characters, LeftSlot};
 use super::data::{self, Difficulty, Stat};
 use super::hud::{HudFont, SpellIcon};
 use super::{Phase, Run, Selection};
@@ -305,7 +305,7 @@ fn env_usize(key: &str) -> Option<usize> {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<TalentPage>()
-        .add_systems(Startup, spawn_page.after(super::hud::setup_hud))
+        .add_systems(Startup, spawn_page.after(super::characters::spawn_ui))
         .add_systems(OnEnter(Phase::Playing), apply_bonus)
         .add_systems(Update, (press, show, rebuild).chain());
 }
@@ -416,7 +416,11 @@ fn button_bundle(action: TalentButton, w: f32, h: f32, edge: Color) -> impl Bund
     )
 }
 
-fn spawn_page(mut commands: Commands, font: Option<Res<HudFont>>) {
+fn spawn_page(
+    mut commands: Commands,
+    font: Option<Res<HudFont>>,
+    slots: Query<(Entity, &LeftSlot)>,
+) {
     let Some(font) = font else { return };
     let f = &font.0;
     commands
@@ -444,25 +448,29 @@ fn spawn_page(mut commands: Commands, font: Option<Res<HudFont>>) {
                 ..default()
             },
         ));
-    // Its button, under Records on the character screen.
-    commands
-        .spawn((
+    // Its button, in the character screen's left column under the list.
+    let Some(slot) = slots
+        .iter()
+        .find_map(|(e, s)| (*s == LeftSlot::Talents).then_some(e))
+    else {
+        return;
+    };
+    commands.entity(slot).with_children(|c| {
+        c.spawn((
             OpenTalents,
             Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(28.0),
-                bottom: Val::Px(84.0),
                 width: Val::Px(236.0),
+                margin: UiRect::top(Val::Px(8.0)),
                 display: Display::None,
                 ..default()
             },
-            GlobalZIndex(50),
             Pickable::IGNORE,
         ))
         .with_children(|c| {
             c.spawn(button_bundle(TalentButton::Open, 236.0, 44.0, EDGE))
                 .with_child(text(f, "Talents", 18.0, Color::WHITE));
         });
+    });
 }
 
 fn press(

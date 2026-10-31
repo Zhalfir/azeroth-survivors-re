@@ -171,6 +171,13 @@ pub(super) struct CompletionLine;
 
 #[derive(Component)]
 struct CharPanel;
+/// The left column's places for the Talents and Records openers, in that order under the list;
+/// their modules spawn the openers into them (`super::talents`, `super::records`).
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LeftSlot {
+    Talents,
+    Records,
+}
 #[derive(Component)]
 struct CharRows;
 #[derive(Component)]
@@ -360,55 +367,89 @@ fn spawn_button(
 }
 
 /// The three panels, empty and out of the layout until the menu shows them.
-fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
+pub(super) fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
     let Some(font) = font else { return };
     let f = &font.0;
-    // The list, where the create tower stands.
+    // The left column, where the create tower stands: the list (which takes what is left), then
+    // the Talents and Records slots ([`LeftSlot`]), one flow from under the WoW logo down to Enter
+    // World's line, so no part can sit over another at any aspect. Packed to the bottom: on
+    // create, with the list out, Records stays under the tower.
     commands
         .spawn((
-            CharPanel,
             Node {
                 position_type: PositionType::Absolute,
-                // Under the WoW logo, which draws over the top of the tower's place.
                 left: Val::Px(28.0),
                 top: Val::Px(136.0),
+                bottom: Val::Px(menu::ENTER_BOTTOM),
                 width: Val::Px(236.0),
-                height: Val::Px(528.0),
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(6.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                display: Display::None,
+                justify_content: JustifyContent::FlexEnd,
                 ..default()
             },
-            BackgroundColor(FILL),
-            BorderColor::all(EDGE),
             GlobalZIndex(50),
+            Pickable::IGNORE,
         ))
-        .with_children(|p| {
-            p.spawn((text(f, "Characters", 18.0, GOLD), CountLabel));
-            p.spawn((
-                CharRows,
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                },
-            ));
-            spawn_button(p, f, CharButton::Create, "Create New Character", 210.0, ());
-            spawn_button(
-                p,
-                f,
-                CharButton::Delete,
-                "Delete Character",
-                210.0,
-                DeleteLabel,
-            );
+        .with_children(|col| {
+            spawn_list(col, f);
+            col.spawn((LeftSlot::Talents, Node::default(), Pickable::IGNORE));
+            col.spawn((LeftSlot::Records, Node::default(), Pickable::IGNORE));
         });
+    spawn_bars(&mut commands, f);
+}
+
+/// The character list, filling the left column above Talents and Records. It clips rather than
+/// spills: eight characters at the text floor need about the column's height.
+fn spawn_list(col: &mut ChildSpawnerCommands, f: &Handle<Font>) {
+    col.spawn((
+        CharPanel,
+        Node {
+            flex_grow: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_height: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(6.0),
+            padding: UiRect::all(Val::Px(10.0)),
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            overflow: Overflow::clip_y(),
+            display: Display::None,
+            ..default()
+        },
+        BackgroundColor(FILL),
+        BorderColor::all(EDGE),
+    ))
+    .with_children(|p| {
+        p.spawn((text(f, "Characters", 18.0, GOLD), CountLabel));
+        // The rows take what Create and Delete leave, and clip past it.
+        p.spawn((
+            CharRows,
+            Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                overflow: Overflow::clip_y(),
+                ..default()
+            },
+        ));
+        spawn_button(p, f, CharButton::Create, "Create New Character", 210.0, ());
+        spawn_button(
+            p,
+            f,
+            CharButton::Delete,
+            "Delete Character",
+            210.0,
+            DeleteLabel,
+        );
+    });
+}
+
+/// The difficulty picker and the create bar, over the bottom centre.
+fn spawn_bars(commands: &mut Commands, f: &Handle<Font>) {
     // The difficulty picker, above the character's name line and Enter World.
     commands
         .spawn((
@@ -437,7 +478,7 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
             CreateBar,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(30.0),
+                bottom: Val::Px(menu::ENTER_BOTTOM),
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,

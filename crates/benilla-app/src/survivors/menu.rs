@@ -37,6 +37,16 @@ const ROW_PITCH: f32 = 36.0;
 const ROW_H: f32 = 34.0;
 const ROW_W: f32 = 228.0;
 
+/// Enter World's row: its foot over the screen's bottom, its height (`CharSelectEnterWorldButton`'s
+/// 60), the gap to Demo and Demo's width. The left column ends on the same line
+/// (`super::characters`).
+pub(super) const ENTER_BOTTOM: f32 = 30.0;
+const ENTER_H: f32 = 60.0;
+const ENTER_GAP: f32 = 16.0;
+const DEMO_W: f32 = 150.0;
+/// The name line's foot: just over Enter World's row.
+const NAME_BOTTOM: f32 = ENTER_BOTTOM + ENTER_H + 10.0;
+
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
     Race(u8),
@@ -171,10 +181,10 @@ pub(super) fn build_menu(
         }
         zone_frame(ui, &art, f);
 
-        // `CharSelectCharacterName`, GlueFontNormalHuge at BOTTOM (0,100).
+        // `CharSelectCharacterName`, GlueFontNormalHuge, just over Enter World's row.
         ui.spawn(Node {
             position_type: PositionType::Absolute,
-            bottom: Val::Px(100.0),
+            bottom: Val::Px(NAME_BOTTOM),
             width: Val::Percent(100.0),
             justify_content: JustifyContent::Center,
             ..default()
@@ -195,18 +205,27 @@ pub(super) fn build_menu(
                 1.0,
             );
         });
-        // `CharSelectEnterWorldButton`, 200×60 at BOTTOM (0,30).
+        // `CharSelectEnterWorldButton`, 200×60, centred on the bottom, with Demo on its right: a
+        // row of [spacer, Enter World, Demo] with the spacer as wide as Demo keeps Enter World on
+        // the centre line. Demo is the same height and caption, its face dimmed: the secondary
+        // action.
         ui.spawn((
             EnterSlot,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(30.0),
+                bottom: Val::Px(ENTER_BOTTOM),
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(ENTER_GAP),
                 ..default()
             },
         ))
         .with_children(|c| {
+            c.spawn(Node {
+                width: Val::Px(DEMO_W),
+                ..default()
+            });
             glue_button(
                 c,
                 &art,
@@ -214,31 +233,40 @@ pub(super) fn build_menu(
                 MenuAction::Enter,
                 "Enter World",
                 200.0,
-                60.0,
+                ENTER_H,
                 GlueBtnKind::Normal,
                 1.0,
             );
-            // Demo sits to Enter World's right, centred on its height.
-            c.spawn(Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(50.0),
-                margin: UiRect::left(Val::Px(120.0)),
-                top: Val::Px(11.0),
-                ..default()
-            })
-            .with_children(|demo| {
-                glue_button(
-                    demo,
-                    &art,
-                    f,
-                    MenuAction::Demo,
-                    "Demo",
-                    150.0,
-                    38.0,
-                    GlueBtnKind::Small,
-                    1.0,
-                );
-            });
+            let demo = glue_button(
+                c,
+                &art,
+                f,
+                MenuAction::Demo,
+                "Demo",
+                DEMO_W,
+                ENTER_H,
+                GlueBtnKind::Normal,
+                1.0,
+            );
+            // Under the sheen and caption (child 0), over the face: a dark veil, inset to the
+            // art's rounded edge.
+            let veil = c
+                .commands()
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(3.0),
+                        right: Val::Px(3.0),
+                        top: Val::Px(3.0),
+                        bottom: Val::Px(3.0),
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.4)),
+                    Pickable::IGNORE,
+                ))
+                .id();
+            c.commands().entity(demo).insert_children(0, &[veil]);
         });
     });
 }

@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::auto::Auto;
-use super::characters::Characters;
+use super::characters::{Characters, LeftSlot};
 use super::data::{self, Difficulty};
 use super::hud::{rgb, HudFont};
 use super::{Phase, Run, Selection};
@@ -141,7 +141,7 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(load())
         .init_resource::<Entry>()
         .init_resource::<Page>()
-        .add_systems(Startup, spawn_ui.after(super::hud::setup_hud))
+        .add_systems(Startup, spawn_ui.after(super::characters::spawn_ui))
         .add_systems(OnEnter(Phase::GameOver), offer_entry)
         .add_systems(OnExit(Phase::GameOver), drop_entry)
         .add_systems(Update, (press, show, refresh_entry, rebuild_page).chain());
@@ -193,7 +193,11 @@ fn button(
         });
 }
 
-fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
+fn spawn_ui(
+    mut commands: Commands,
+    font: Option<Res<HudFont>>,
+    slots: Query<(Entity, &LeftSlot)>,
+) {
     let Some(font) = font else { return };
     let f = &font.0;
     // The initials prompt, over the results.
@@ -310,22 +314,26 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
             ));
             button(root, f, RecButton::Close, "Back", 240.0, 44.0);
         });
-    // Its button, under the character list.
-    commands
-        .spawn((
+    // Its button, at the foot of the character screen's left column.
+    let Some(slot) = slots
+        .iter()
+        .find_map(|(e, s)| (*s == LeftSlot::Records).then_some(e))
+    else {
+        return;
+    };
+    commands.entity(slot).with_children(|c| {
+        c.spawn((
             OpenButton,
             Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(28.0),
-                bottom: Val::Px(36.0),
                 width: Val::Px(236.0),
+                margin: UiRect::top(Val::Px(8.0)),
                 display: Display::None,
                 ..default()
             },
-            GlobalZIndex(50),
             Pickable::IGNORE,
         ))
         .with_children(|c| button(c, f, RecButton::Open, "Records", 236.0, 44.0));
+    });
 }
 
 /// The three letters a name starts with, `A` for the rest.
