@@ -73,6 +73,7 @@ impl Plugin for SurvivorsPlugin {
                 feedback::plugin,
                 detail::plugin,
                 bossbar::plugin,
+                secrets::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
