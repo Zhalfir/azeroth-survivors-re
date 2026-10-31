@@ -13,7 +13,7 @@
 //! end and on an unlock, never per kill (and on the way back to the menu, for an abandoned run).
 //! A kill or chest that crosses a threshold unlocks mid-run.
 //!
-//! Each unlock writes one [`Revealed`], for the banner (a later task).
+//! Each unlock writes one [`Revealed`], for the banner (a later task). The Secrets page is [`page`].
 //!
 //! **Playing one.** A look is `(display, race, sex)`; a secret race's looks carry a look code,
 //! [`look_code`] (100 + its index), in the race slot, one look per display variant. Only the
@@ -26,6 +26,7 @@
 //! in run time, so the pauses and card screens never count).
 
 pub(super) mod data;
+pub(super) mod page;
 
 use std::collections::{HashMap, HashSet};
 
@@ -75,6 +76,8 @@ pub(super) struct Progress {
     /// Kills per creature family ([`family`]): "murloc", "gnoll".
     pub kills_by_family: HashMap<String, u32>,
     pub wins: Vec<WinRecord>,
+    /// Unlocks the Secrets page has shown (`page`): the rest wear a NEW ribbon.
+    pub seen: Vec<String>,
     /// Counted since the last save.
     #[serde(skip)]
     dirty: bool,
@@ -484,7 +487,8 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(Update, (load_once, count).chain())
         .add_systems(OnEnter(Phase::Menu), save_if_dirty)
-        .add_systems(Update, fill_secret_faces);
+        .add_systems(Update, fill_secret_faces)
+        .add_plugins(page::plugin);
 }
 
 /// Read the file once, on the first frame (as `characters` does, for the page's store).
@@ -1009,6 +1013,19 @@ mod tests {
         assert_eq!(super::super::menu::next_skin(&looks, 4), Some(2));
         // One look of its race and sex: itself.
         assert_eq!(super::super::menu::next_skin(&looks, 0), Some(0));
+    }
+
+    #[test]
+    fn the_skin_hint_shows_only_for_a_secret_with_another_look() {
+        use super::super::menu::has_other_skin;
+        let m = look_code(SecretRace::Murloc);
+        let k = look_code(SecretRace::Imp);
+        let looks = vec![(1, 1, 0), (2, 1, 0), (31, m, 0), (188, m, 0), (4449, k, 0)];
+        assert!(has_other_skin(&looks, Some(2)));
+        // A normal race with two looks: no hint; a secret with one: none either.
+        assert!(!has_other_skin(&looks, Some(0)));
+        assert!(!has_other_skin(&looks, Some(4)));
+        assert!(!has_other_skin(&looks, None));
     }
 
     fn saved(text: &str) -> super::super::characters::Character {

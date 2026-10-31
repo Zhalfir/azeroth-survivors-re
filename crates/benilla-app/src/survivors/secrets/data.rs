@@ -65,7 +65,6 @@ impl SecretRace {
 }
 
 /// One secret race's data.
-#[allow(dead_code)] // `riddle` and `condition` are read by the Secrets page (a later task).
 pub(in crate::survivors) struct SecretDef {
     /// Stable save key: `Progress::unlocked` and a character's look name it. Never rename.
     pub key: &'static str,

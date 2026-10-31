@@ -91,6 +91,25 @@ pub(super) struct TowerRoot;
 #[derive(Component)]
 pub(super) struct SecretsPanel;
 
+/// Under the secret races: a second tap on the picked one shows its next skin; shown while the
+/// picked race is a secret with more than one look.
+#[derive(Component)]
+pub(super) struct SkinHint;
+
+#[cfg(target_os = "android")]
+const SKIN_HINT: &str = "Tap again for another look";
+#[cfg(not(target_os = "android"))]
+const SKIN_HINT: &str = "Click again for another look";
+
+/// Whether the picked look is a secret race with another skin for this class and sex.
+pub(super) fn has_other_skin(looks: &[(u32, u8, u8)], look: Option<usize>) -> bool {
+    let Some(&(_, r, s)) = look.and_then(|i| looks.get(i)) else {
+        return false;
+    };
+    secrets::from_look_code(r).is_some()
+        && looks.iter().filter(|&&(_, lr, ls)| lr == r && ls == s).count() > 1
+}
+
 /// The secrets box's inner width: two race buttons and their gap.
 const SECRETS_W: f32 = 2.0 * 48.0 + 6.0;
 
@@ -555,6 +574,24 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                             );
                         }
                     });
+                outlined_text(
+                    panel,
+                    Node {
+                        width: px(SECRETS_W),
+                        display: Display::None,
+                        ..default()
+                    },
+                    SkinHint,
+                    (),
+                    GlueText {
+                        text: SKIN_HINT,
+                        size: TEXT_FLOOR,
+                        color: SUMMARY,
+                        wrap: true,
+                    },
+                    f,
+                    1.0,
+                );
             });
     });
 }
@@ -869,6 +906,10 @@ pub(super) fn refresh_menu_ui(
     mut faces: Query<(&RaceFace, &mut ImageNode)>,
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
     mut panels: Query<&mut Node, (With<SecretsPanel>, Without<MenuAction>)>,
+    mut hints: Query<
+        &mut Node,
+        (With<SkinHint>, Without<SecretsPanel>, Without<MenuAction>),
+    >,
     progress: Res<Progress>,
     mut cache: Local<(Option<u32>, bool, usize, Vec<Vec<(u32, u8, u8)>>)>,
 ) {
@@ -898,6 +939,16 @@ pub(super) fn refresh_menu_ui(
         };
         if node.display != want {
             node.display = want;
+        }
+    }
+    let hint = if has_other_skin(&selection.looks, selection.look) {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut hints {
+        if node.display != hint {
+            node.display = hint;
         }
     }
     let cur = selection

@@ -251,12 +251,15 @@ fn previous(d: Difficulty) -> Option<Difficulty> {
 
 #[derive(Component)]
 struct CharPanel;
-/// The left column's places for the Talents and Records openers, in that order under the list;
-/// their modules spawn the openers into them (`super::talents`, `super::records`).
+/// The left column's places for the Talents, Records and Secrets openers, in that order under
+/// the list; their modules spawn the openers into them (`super::talents`, `super::records`,
+/// `super::secrets::page`).
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LeftSlot {
     Talents,
     Records,
+    /// The Secrets page's opener (`super::secrets::page`).
+    Secrets,
 }
 #[derive(Component)]
 struct CharRows;
@@ -476,6 +479,7 @@ pub(super) fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
             spawn_list(col, f);
             col.spawn((LeftSlot::Talents, Node::default(), Pickable::IGNORE));
             col.spawn((LeftSlot::Records, Node::default(), Pickable::IGNORE));
+            col.spawn((LeftSlot::Secrets, Node::default(), Pickable::IGNORE));
         });
     spawn_bars(&mut commands, f);
 }

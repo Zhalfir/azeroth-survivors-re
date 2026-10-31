@@ -1253,8 +1253,11 @@ pub(super) fn keys(
     mut selection: ResMut<Selection>,
     mut run: ResMut<Run>,
     mut next: ResMut<NextState<Phase>>,
+    secrets_page: Res<super::secrets::page::SecretsPage>,
 ) {
     match phase.get() {
+        // Enter World's key does nothing while the Secrets page covers the menu.
+        Phase::Menu if secrets_page.is_open() => {}
         Phase::Menu => {
             if keys.just_pressed(KeyCode::Enter)
                 && selection.character.is_some()
