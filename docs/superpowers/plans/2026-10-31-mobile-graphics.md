@@ -10,6 +10,28 @@
 
 **Spec:** the 2026-10-31 brainstorm in this session (gamedev skills: `performance-optimization`, `bevy-ecs`, `shader-programming`, `game-feel`, `game-ui-ux`). No separate design doc; the decisions are restated here.
 
+## Priority and status (updated 2026-10-31, user: "first let's focus on CPU and performance, then the rest")
+
+Done and reviewed on branch `mobile-graphics`: A1 frame-time split, A2 frame cap, A3 separation grid,
+A4 GSR upscaler, A6 screen shake, A7 Demo button, A9 camera lock, A10 sound diagnostics (logging only).
+In progress: A5 ASTC textures.
+
+Evidence that sets the order: on the tablet the early game already spends ~13 ms of CPU per frame
+with under 30 enemies (60 fps budget: 16.7 ms), so the late game (150-220 enemies, 25-35 fps last
+night) is most likely **CPU-bound**. GPU-side work (A4, A5) saves heat and battery but will not lift
+late-game FPS on its own.
+
+Order from here:
+1. **A5** (running) — finish and review.
+2. **B1 Baseline** on a `APK_FEATURES=dev` build (CPU and GPU ms per second) — confirms CPU vs GPU.
+3. **B3 CPU** — per-system timing first (`trace_chrome` on a dev build, or `bevy` trace spans), then
+   the biggest system: enemy pooling, animation LOD for distant enemies, the per-enemy systems.
+   Each change measured on the tablet and kept only if it moves the numbers.
+4. **B2 GPU** only if B1 shows the GPU limiting; **B4 heat** (thermal headroom).
+5. **A10** sound fix — the root cause is being confirmed from the tablet log; fix as soon as named.
+6. The rest: **A11** menu/HUD layout, **A12** 2× speed, **A8** README, then the next feature phase
+   (gear + secret races and weapons, to brainstorm).
+
 ## Global Constraints
 
 - Bevy stays at 0.18.1; the `bevy-ecs` skill's 0.20 examples are concepts, not APIs.
@@ -196,7 +218,7 @@ Each task: run, read numbers, keep or revert, write the before/after in `docs/BA
 
 - [ ] Enemy pooling: hide and reuse dead enemies instead of `despawn` (`enemies.rs:602`), prewarmed at run start; measure spawn-second hitches.
 - [ ] Animation LOD: update the bone palette (`benilla-world/src/rig_palette.rs`) at full rate near the hero, half or quarter rate for small or distant enemies.
-- [ ] Per-system timing with `bevy` trace spans, then the biggest system first.
+- [ ] Per-system timing first: a dev build with `trace_chrome` (benilla-app feature; writes every system's span) or `tracy`, a 5-minute Mythic bot run, then rank systems by ms/frame; attack the biggest first.
 
 ### Task B4: Heat
 
