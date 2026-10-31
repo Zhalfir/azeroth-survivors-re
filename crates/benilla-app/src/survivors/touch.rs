@@ -235,24 +235,29 @@ fn translate_touches(
         }
     }
 
-    // A phase change mid-touch (a level-up while the thumb is on the stick) hands every finger
-    // back: each must lift before it means anything in the new phase.
+    // A phase change mid-touch hands the aim, orbit and button fingers back: each must lift
+    // before it means anything in the new phase. The stick's thumb is kept: on the card screen it
+    // moves nothing, and when play resumes it drives again without lifting. Lifting it to pick a
+    // card with the other hand, then pressing again, was the user's complaint (tablet,
+    // 2026-10-31).
     if !playing {
         for (role, _) in state.fingers.values_mut() {
-            if matches!(
-                role,
-                Role::Stick { .. } | Role::Aim | Role::Orbit | Role::Button(_)
-            ) {
+            if matches!(role, Role::Aim | Role::Orbit | Role::Button(_)) {
                 *role = Role::Ignored;
             }
         }
     }
 
-    // The joystick: the keys it holds, and the cursor ahead of the hero the way it points.
-    let stick = state.fingers.values().find_map(|(r, at)| match r {
-        Role::Stick { origin } => Some((*at - *origin).clamp_length_max(STICK_RADIUS)),
-        _ => None,
-    });
+    // The joystick: the keys it holds, and the cursor ahead of the hero the way it points. Only
+    // while playing; a thumb held through the card screen resumes when it closes.
+    let stick = state
+        .fingers
+        .values()
+        .find_map(|(r, at)| match r {
+            Role::Stick { origin } => Some((*at - *origin).clamp_length_max(STICK_RADIUS)),
+            _ => None,
+        })
+        .filter(|_| playing);
     let mut want: Vec<KeyCode> = Vec::new();
     if let Some(d) = stick {
         let dead = STICK_RADIUS * STICK_DEAD;
@@ -398,7 +403,8 @@ fn hint(key: KeyCode) -> &'static str {
     match key {
         KeyCode::KeyF => "F",
         KeyCode::KeyC => "C",
-        KeyCode::Escape => "Esc",
+        // A tablet has no Escape key; the button opens the pause menu.
+        KeyCode::Escape => "Menu",
         _ => "",
     }
 }
