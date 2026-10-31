@@ -24,7 +24,15 @@ late-game FPS on its own.
 Order from here:
 1. **A5** (running) — finish and review.
 2. **B1 Baseline** on a `APK_FEATURES=dev` build (CPU and GPU ms per second) — confirms CPU vs GPU.
-3. **B3 CPU** — per-system timing first (`trace_chrome` on a dev build, or `bevy` trace spans), then
+3. **B3 CPU** (tablet evidence 2026-10-31: the main thread runs at ~81 % of one core, the render
+   thread ~42 %, two workers ~35 %, 35 threads idle — about 2 of 8 cores used; CPU ms/frame
+   13 @ 21 enemies → 26.5 @ 162, i.e. a ~12 ms fixed cost plus ~0.1 ms per enemy; survivors loads
+   all 121 client plugins, auction/mail/bank/guild/chat/quests/login/Lua UI included):
+   - **B3a lean plugin set** (user's idea): survivors builds only the plugins it uses; prove with
+     the headless GamePlugins test and a survivors smoke run; measure cpu_ms before/after.
+   - **B3b cores**: keep the main thread on the big cores (affinity / Android perf hint) and widen
+     Bevy's parallelism where systems allow.
+   - **B3c** per-system timing first (`trace_chrome` on a dev build, or `bevy` trace spans), then
    the biggest system: enemy pooling, animation LOD for distant enemies, the per-enemy systems.
    Each change measured on the tablet and kept only if it moves the numbers.
 4. **B2 GPU** only if B1 shows the GPU limiting; **B4 heat** (thermal headroom).
