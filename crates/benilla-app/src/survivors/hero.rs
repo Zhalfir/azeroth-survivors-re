@@ -89,6 +89,42 @@ fn move_dir(input: Vec3, yaw: f32) -> Vec3 {
     Vec3::new(input.x * cy + input.z * sy, 0.0, input.z * cy - input.x * sy)
 }
 
+/// How long the hero keeps its heading after a level-up card pick, and the ease-out at its end.
+/// On the tablet the finger leaves the stick to tap a card, so the hero used to stop dead after
+/// every pick until the thumb found the stick again (user feedback, 2026-10-31). Any input ends
+/// the carry at once; the pick's grace second (`super::grace`) covers it.
+const CARRY_SECS: f32 = 1.0;
+const CARRY_EASE: f32 = 0.2;
+
+/// The heading carried across a card pick.
+#[derive(Resource, Default)]
+pub(super) struct MoveCarry {
+    /// The manual heading on the last playing frame.
+    last: Vec3,
+    /// The heading carried after the pick.
+    dir: Vec3,
+    /// Seconds of carry left.
+    left: f32,
+}
+
+/// Full speed until the last [`CARRY_EASE`] seconds, then a linear ease to a stop.
+fn carry_ease(left: f32) -> f32 {
+    (left / CARRY_EASE).clamp(0.0, 1.0)
+}
+
+/// The level-up cards came up: remember where the hero was heading.
+pub(super) fn remember_heading(mut carry: ResMut<MoveCarry>) {
+    carry.dir = carry.last;
+    carry.left = 0.0;
+}
+
+/// The pick is made: carry that heading for [`CARRY_SECS`].
+pub(super) fn carry_heading(mut carry: ResMut<MoveCarry>) {
+    if carry.dir != Vec3::ZERO {
+        carry.left = CARRY_SECS;
+    }
+}
+
 /// Where a battleground's runs start.
 pub(super) fn arena(map: &data::MapDef) -> Vec3 {
     wow_to_bevy(map.center)
@@ -240,12 +276,14 @@ pub(super) fn drive_hero(
     world: WorldPoint,
     auto: Option<Res<super::auto::Auto>>,
     mut player: ResMut<crate::player::Player>,
+    mut carry: ResMut<MoveCarry>,
     mut hero: Query<(&mut Transform, &mut MovementState, &mut Hero)>,
 ) {
     let focus = match hero.single_mut() {
         Ok((mut tf, mut mv, mut hm)) => {
             let dt = time.delta_secs();
             let mut dir = Vec3::ZERO;
+            let mut ease = 1.0;
             if let Some(auto) = auto
                 .as_deref()
                 .filter(|_| *phase.get() == Phase::Playing && run.dead_t.is_none())
@@ -267,6 +305,16 @@ pub(super) fn drive_hero(
                 // Camera-relative in both modes: a view locked at an angle keeps "up" up the
                 // screen. At the default view (yaw 0) this is the old world-relative WASD.
                 dir = move_dir(dir, rig.yaw);
+                carry.last = dir;
+                if dir != Vec3::ZERO {
+                    carry.left = 0.0;
+                } else if carry.left > 0.0 {
+                    // After a card pick the finger is still off the stick: keep going the way the
+                    // hero went when the cards came up, easing out (`MoveCarry`).
+                    dir = carry.dir;
+                    ease = carry_ease(carry.left);
+                    carry.left = (carry.left - dt).max(0.0);
+                }
             }
             let mut pos = tf.translation;
             // Locked, the hero faces the cursor and WASD moves him under it, so he backpedals and
@@ -285,7 +333,7 @@ pub(super) fn drive_hero(
             }
             if dir != Vec3::ZERO && dt > 0.0 {
                 let dir = dir.normalize();
-                let speed = run.stats().speed * run.haste_mult();
+                let speed = run.stats().speed * run.haste_mult() * ease;
                 pos += dir * speed * dt;
                 mv.speed = speed;
                 mv.flags = match face {
@@ -648,6 +696,32 @@ pub(super) fn reach(hero: Vec3, other: Vec3) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_carry_runs_full_then_eases_out() {
+        assert_eq!(carry_ease(1.0), 1.0);
+        assert_eq!(carry_ease(0.2), 1.0);
+        assert!((carry_ease(0.1) - 0.5).abs() < 1e-6);
+        assert_eq!(carry_ease(0.0), 0.0);
+    }
+
+    #[test]
+    fn a_pick_carries_the_heading_and_standing_still_carries_nothing() {
+        let mut world = World::new();
+        world.insert_resource(MoveCarry {
+            last: Vec3::X,
+            ..default()
+        });
+        world.run_system_once(remember_heading).unwrap();
+        world.run_system_once(carry_heading).unwrap();
+        let c = world.resource::<MoveCarry>();
+        assert_eq!((c.dir, c.left), (Vec3::X, CARRY_SECS));
+
+        world.insert_resource(MoveCarry::default());
+        world.run_system_once(remember_heading).unwrap();
+        world.run_system_once(carry_heading).unwrap();
+        assert_eq!(world.resource::<MoveCarry>().left, 0.0);
+    }
 
     /// The hero is the character the player hears from: the sound plugin seats the listener on an
     /// `Embodied` body and falls back to the camera, and the hero has none. Measured on the tablet,

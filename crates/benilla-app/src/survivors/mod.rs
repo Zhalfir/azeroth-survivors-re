@@ -77,6 +77,7 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<Run>()
             .init_resource::<hero::CamRig>()
             .init_resource::<hero::AimPoint>()
+            .init_resource::<hero::MoveCarry>()
             .init_resource::<abilities::PendingHits>()
             .init_resource::<enemies::Spawner>()
             .init_resource::<hud::Offer>()
@@ -173,7 +174,11 @@ impl Plugin for SurvivorsPlugin {
                     .after(hud::show_panels),
             )
             .add_systems(OnEnter(Phase::Playing), (unpause, grace))
-            .add_systems(OnEnter(Phase::LevelUp), (pause, hud::roll_offer))
+            .add_systems(
+                OnEnter(Phase::LevelUp),
+                (pause, hud::roll_offer, hero::remember_heading),
+            )
+            .add_systems(OnExit(Phase::LevelUp), hero::carry_heading)
             .add_systems(OnEnter(Phase::Paused), pause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
             .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
