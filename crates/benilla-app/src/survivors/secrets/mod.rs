@@ -532,7 +532,12 @@ pub(super) fn count(
         events.read().for_each(drop);
         return;
     }
-    let p = &mut *progress;
+    if events.is_empty() {
+        return;
+    }
+    // Written without change detection: the Secrets page rebuilds on `Progress` changing, and a
+    // frame of kills from no secret family changes nothing it shows. Flagged below when counted.
+    let p = progress.bypass_change_detection();
     let (mut ended, mut counted) = (false, false);
     for e in events.read() {
         match *e {
@@ -583,6 +588,8 @@ pub(super) fn count(
     if !ended && !counted {
         return;
     }
+    progress.set_changed();
+    let p = &mut *progress;
     p.dirty = true;
     // The zone conditions can change only at a run's end, when a completion is recorded.
     let clears = if ended {

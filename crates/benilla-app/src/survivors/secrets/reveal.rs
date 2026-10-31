@@ -226,8 +226,13 @@ fn glow(alpha: f32) -> BackgroundGradient {
     ]))
 }
 
-fn new_run(mut reveals: ResMut<Reveals>) {
+fn new_run(mut reveals: ResMut<Reveals>, mut line: Query<&mut Text, With<RevealedLine>>) {
     reveals.this_run.clear();
+    for mut t in &mut line {
+        if !t.0.is_empty() {
+            t.0.clear();
+        }
+    }
 }
 
 fn queue(mut revealed: MessageReader<Revealed>, mut reveals: ResMut<Reveals>) {
@@ -278,14 +283,16 @@ fn play(
 fn draw(
     reveals: Res<Reveals>,
     phase: Res<State<Phase>>,
+    loading: Option<Res<crate::loading_screen::LoadingScreen>>,
     mut root: Query<(&mut Node, &mut Visibility), With<BannerRoot>>,
     mut banner: Query<(&mut UiTransform, &mut BackgroundGradient), With<Banner>>,
     mut name: Query<&mut Text, With<BannerName>>,
     mut texts: Query<(&BaseColor, &mut TextColor)>,
     mut named: Local<Option<SecretRace>>,
+    mut drawn: Local<Option<(f32, f32)>>,
 ) {
     let showing = reveals.showing();
-    let ok = can_show(*phase.get(), false);
+    let ok = can_show(*phase.get(), loading.is_some_and(|l| l.covering()));
     let Ok((mut node, mut vis)) = root.single_mut() else {
         return;
     };
@@ -297,8 +304,10 @@ fn draw(
     if *vis != want {
         *vis = want;
     }
-    let Some((race, t)) = showing else {
-        *named = None;
+    let Some((race, t)) = showing.filter(|_| ok) else {
+        if showing.is_none() {
+            *named = None;
+        }
         return;
     };
     // A queued banner follows straight on: name it on its first frame.
@@ -317,6 +326,11 @@ fn draw(
         node.top = top;
     }
     let (scale, alpha) = (banner_scale(t), banner_alpha(t));
+    // The hold is ~2.5 s of the same frame: rebuild the gradient and recolour only on a change.
+    if *drawn == Some((scale, alpha)) {
+        return;
+    }
+    *drawn = Some((scale, alpha));
     if let Ok((mut tf, mut bg)) = banner.single_mut() {
         tf.scale = Vec2::splat(scale);
         *bg = glow(alpha);
@@ -332,7 +346,9 @@ fn results(
     phase: Res<State<Phase>>,
     mut line: Query<&mut Text, With<RevealedLine>>,
 ) {
-    if *phase.get() != Phase::GameOver || !reveals.is_changed() {
+    // On entering the results (a race revealed mid-run is already in `this_run`) and on every
+    // reveal while they show (the run's end can unlock one).
+    if *phase.get() != Phase::GameOver || !(reveals.is_changed() || phase.is_changed()) {
         return;
     }
     let want = results_line(&reveals.this_run);

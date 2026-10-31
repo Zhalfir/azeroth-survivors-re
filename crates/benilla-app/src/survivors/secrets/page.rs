@@ -19,6 +19,7 @@
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::touch::Touches;
 use bevy::prelude::*;
+use bevy::ui::UiGlobalTransform;
 use bevy::window::PrimaryWindow;
 
 use super::{def, Progress, SecretRace};
@@ -42,7 +43,7 @@ const RIBBON: Color = Color::srgb(0.7, 0.08, 0.04);
 
 /// A card, UI units (768 to the screen's height).
 const CARD_W: f32 = 220.0;
-const CARD_H: f32 = 244.0;
+const CARD_H: f32 = 258.0;
 const GAP: f32 = 12.0;
 /// The page's side gutter.
 const SIDE: f32 = 16.0;
@@ -446,7 +447,7 @@ fn rebuild(
     let f = &font.0;
     let (entries, found) = page_entries(&progress);
     if let Ok(mut t) = title.single_mut() {
-        t.0 = format!("Secrets — {found} / {} discovered", entries.len());
+        t.0 = format!("{found} / {} secrets discovered", entries.len());
     }
     commands.entity(grid).despawn_related::<Children>();
     commands.entity(grid).with_children(|g| {
@@ -679,12 +680,19 @@ fn focus_style(
     }
 }
 
+/// A finger must travel this far, in UI units, before it scrolls: a tap on a card or Back that
+/// wobbles a little stays a tap.
+const DRAG_THRESHOLD: f32 = 8.0;
+
 /// The grid scrolls by wheel, by touch drag, and to keep the focused card in view.
+#[allow(clippy::type_complexity)]
 fn scroll(
     mut page: ResMut<SecretsPage>,
     mut wheel: MessageReader<MouseWheel>,
     touches: Res<Touches>,
     scale: Res<UiScale>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    buttons: Query<(&PageButton, &ComputedNode, &UiGlobalTransform)>,
     mut grid: Query<(&ComputedNode, &mut ScrollPosition), With<Grid>>,
 ) {
     let mut dy = 0.0;
@@ -698,8 +706,21 @@ fn scroll(
         return;
     }
     // A finger drags the content: up to scroll down. Window px to UI units.
+    let k = 1.0 / scale.0.max(1e-3);
+    let px = windows.single().map_or(1.0, |w| w.scale_factor());
+    // Touches are in logical pixels, the layout in physical ones.
+    let on_back = |at: Vec2| {
+        let at = at * px;
+        buttons.iter().any(|(b, node, tf)| {
+            *b == PageButton::Close
+                && (at - tf.translation).abs().cmple(node.size() * 0.5).all()
+        })
+    };
     for t in touches.iter() {
-        dy -= t.delta().y / scale.0.max(1e-3);
+        if t.distance().length() * k < DRAG_THRESHOLD || on_back(t.start_position()) {
+            continue;
+        }
+        dy -= t.delta().y * k;
     }
     let Ok((node, mut pos)) = grid.single_mut() else {
         return;
@@ -737,11 +758,12 @@ fn fill_icons(
         return;
     };
     for (e, mut img, icon) in &mut icons {
+        // Not done until the texture is in: an archive not yet readable is tried again.
         if let Some(h) = assets.sprite_texture(&format!("{}.blp", icon.path), &mut images) {
             img.image = h;
             img.color = icon.tint;
+            commands.entity(e).insert(RaceIconDone);
         }
-        commands.entity(e).insert(RaceIconDone);
     }
 }
 
