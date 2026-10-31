@@ -155,6 +155,11 @@ mod android {
 
     /// One frame's actual work against its target, both in nanoseconds; called once a frame.
     pub(super) fn report_frame(work_ns: i64, target_ns: i64) {
+        // `WOW_ADPF=0` (`android-env.txt`) turns the hints off: the A/B lever.
+        static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *OFF.get_or_init(|| std::env::var("WOW_ADPF").as_deref() == Ok("0")) {
+            return;
+        }
         if work_ns <= 0 || target_ns <= 0 {
             return;
         }

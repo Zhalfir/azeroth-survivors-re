@@ -115,17 +115,31 @@ pub(super) fn plugin(app: &mut App) {
     let _ = app;
 }
 
-/// The frame's work so far against the cap's target, to the OS's performance hints (Android
-/// ADPF, `benilla_world::thread_qos::report_frame`), before the cap's sleep so the sleep never
-/// counts as work. Uncapped has no target to hint, so nothing is reported (a made-up 60 fps
-/// target would let the OS lower clocks on a 120 Hz uncapped run).
+/// What the cap slept last frame, in nanoseconds, so the hint can take it out of the frame time.
 #[cfg(not(target_arch = "wasm32"))]
-fn hint_frame(samples: Res<super::frametime::FrameSamples>) {
+static LAST_SLEEP_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The frame's work against the cap's target, to the OS's performance hints (Android ADPF,
+/// `benilla_world::thread_qos::report_frame`). The work is the whole frame cycle, not just this
+/// thread's span: the last real frame time less the cap's sleep, or this frame's main-thread span
+/// when that is longer. Reporting only the main thread's ~14 ms against a 16 ms target while the
+/// render thread and GPU made the frame 30-100 ms told the OS it was on time, inviting it to
+/// lower clocks (tablet, 2026-10-31). Uncapped has no target, so nothing is reported.
+#[cfg(not(target_arch = "wasm32"))]
+fn hint_frame(samples: Res<super::frametime::FrameSamples>, real: Res<Time<Real>>) {
     let (Some(started), Some(target)) = (samples.frame_started(), FrameCap::current().target())
     else {
         return;
     };
-    benilla_world::thread_qos::report_frame(started.elapsed(), target);
+    let slept = Duration::from_nanos(LAST_SLEEP_NS.load(std::sync::atomic::Ordering::Relaxed));
+    let work = hinted_work(real.delta(), slept, started.elapsed());
+    benilla_world::thread_qos::report_frame(work, target);
+}
+
+/// The frame cycle's work for the hint: the real frame time less the cap's sleep, or the
+/// main-thread span if longer.
+pub(super) fn hinted_work(real_delta: Duration, slept: Duration, main_span: Duration) -> Duration {
+    real_delta.saturating_sub(slept).max(main_span)
 }
 
 /// Sleep out the rest of the frame: coarse `thread::sleep` to 1 ms short of the target (the OS
@@ -136,17 +150,24 @@ fn hold_frame(samples: Res<super::frametime::FrameSamples>) {
         return;
     };
     let Some(target) = FrameCap::current().target() else {
+        LAST_SLEEP_NS.store(0, std::sync::atomic::Ordering::Relaxed);
         return;
     };
     let Some(rest) = sleep_for(target, started.elapsed()) else {
+        LAST_SLEEP_NS.store(0, std::sync::atomic::Ordering::Relaxed);
         return;
     };
+    let before = std::time::Instant::now();
     if let Some(coarse) = rest.checked_sub(Duration::from_millis(1)) {
         std::thread::sleep(coarse);
     }
     while started.elapsed() < target {
         std::hint::spin_loop();
     }
+    LAST_SLEEP_NS.store(
+        before.elapsed().as_nanos() as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
 }
 
 #[cfg(test)]
@@ -155,6 +176,16 @@ mod tests {
 
     fn ms(x: f64) -> Duration {
         Duration::from_secs_f64(x / 1000.0)
+    }
+
+    #[test]
+    fn the_hint_is_the_whole_frame_less_the_sleep() {
+        // A render-bound 33 ms frame with no sleep: the hint says 33, not the main thread's 14.
+        assert_eq!(hinted_work(ms(33.0), ms(0.0), ms(14.0)), ms(33.0));
+        // An on-time capped frame: 16.2 ms real, 4 ms of it the cap's sleep.
+        assert_eq!(hinted_work(ms(16.2), ms(4.0), ms(12.0)), ms(12.2));
+        // The main thread's own span wins when it is longer (a frame-time hiccup).
+        assert_eq!(hinted_work(ms(10.0), ms(0.0), ms(15.0)), ms(15.0));
     }
 
     #[test]
