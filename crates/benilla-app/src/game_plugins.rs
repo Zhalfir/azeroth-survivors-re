@@ -359,9 +359,14 @@ pub(crate) mod schedule_tests {
                 }),
         );
         app.add_plugins(benilla_world::world_plugins::WorldPlugins);
+        // Survivors starts in the world, as `run_survivors` does.
         let game = GamePlugins {
             connect: false,
-            start: crate::char_select::ClientState::Login,
+            start: if lean {
+                crate::char_select::ClientState::InWorld
+            } else {
+                crate::char_select::ClientState::Login
+            },
         }
         .build();
         app.add_plugins(if lean { survivors_lean(game) } else { game });
@@ -710,14 +715,14 @@ pub(crate) mod schedule_tests {
         assert!(app.world().contains_resource::<Schedules>());
     }
 
-    /// Survivors' lean set builds and runs frames: a disabled plugin that a kept one still needs
-    /// shows up here as a missing-resource panic, not on the tablet.
+    /// Survivors' lean set builds (every kept plugin's `build` and `finish` runs, in the world
+    /// state) and registers fewer per-frame systems. It runs no frame: the headless client has no
+    /// render device, which `ui_models::setup_tiles` needs on the first update for the full set
+    /// too (B3c, 2026-10-31). The runtime check is a survivors run on the tablet, where
+    /// `WOW_SURVIVORS_FULL=1` is the A/B lever.
     #[test]
-    fn the_survivors_lean_set_runs_headless() {
-        let mut app = headless_client_with(true);
-        for _ in 0..3 {
-            app.update();
-        }
+    fn the_survivors_lean_set_builds_with_fewer_systems() {
+        let app = headless_client_with(true);
         let full = headless_client_with(false);
         let systems = |app: &App| {
             app.world()
