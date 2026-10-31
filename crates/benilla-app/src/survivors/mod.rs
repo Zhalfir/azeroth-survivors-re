@@ -6,6 +6,7 @@
 
 mod abilities;
 mod auto;
+mod bossbar;
 mod cards;
 mod characters;
 mod combatlog;
@@ -70,6 +71,7 @@ impl Plugin for SurvivorsPlugin {
                 upscale::plugin,
                 feedback::plugin,
                 detail::plugin,
+                bossbar::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
