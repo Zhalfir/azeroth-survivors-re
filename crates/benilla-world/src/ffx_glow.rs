@@ -100,6 +100,15 @@ pub struct FfxBackdrop {
     pub source: Option<Entity>,
 }
 
+/// Carry (benilla-app survivors): on a world camera an [`FfxBackdrop`] claims, the claimed
+/// combine reads the scene through Snapdragon GSR1 (`shaders/ffx_glow.wgsl` `sgsr1`) instead of
+/// its one bilinear tap, for a world rendered below the window. `sharpness` is GSR's edge
+/// sharpness, Qualcomm's range 1..=2; absent, the combine is as it was.
+#[derive(Component, Clone, Copy, ExtractComponent)]
+pub struct FfxUpscale {
+    pub sharpness: f32,
+}
+
 /// The glow weight `w`: the live `LightParams.glow`, synced every frame by [`sync_gain`].
 #[derive(Resource, Clone, ExtractResource)]
 pub struct FfxGlowGain(pub f32);
@@ -1083,7 +1092,9 @@ impl ViewNode for FfxTransparent2dNode {
                 };
                 let pipelines = world.resource::<FfxGlowPipelines>();
                 let pipeline_cache = world.resource::<PipelineCache>();
-                let (uniform, wave) = live_combine(world, glow);
+                let (mut uniform, wave) = live_combine(world, glow);
+                // Carry: the scene tap's upscaler, the uniform's free `wave.z` ([`FfxUpscale`]).
+                uniform[6] = world.get::<FfxUpscale>(source).map_or(0.0, |u| u.sharpness);
                 // Still compiling: this frame has no world in it.
                 let combine = pipeline_cache.get_render_pipeline(view.pair.armed(wave))?;
                 world.resource::<RenderQueue>().write_buffer(
@@ -1166,6 +1177,7 @@ impl Plugin for FfxGlowPlugin {
             .add_plugins((
                 ExtractComponentPlugin::<FfxGlow>::default(),
                 ExtractComponentPlugin::<FfxBackdrop>::default(),
+                ExtractComponentPlugin::<FfxUpscale>::default(),
                 ExtractResourcePlugin::<FfxGlowGain>::default(),
                 ExtractResourcePlugin::<FfxDeathFade>::default(),
                 ExtractResourcePlugin::<GlueFfx>::default(),

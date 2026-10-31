@@ -29,6 +29,7 @@ mod talents;
 #[cfg(target_os = "android")]
 mod touch;
 mod units;
+mod upscale;
 
 use benilla_world::schedule::WorldStage;
 use bevy::prelude::*;
@@ -64,6 +65,7 @@ impl Plugin for SurvivorsPlugin {
                 frametime::plugin,
                 records::plugin,
                 talents::plugin,
+                upscale::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()

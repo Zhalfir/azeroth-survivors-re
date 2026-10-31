@@ -1,7 +1,7 @@
 //! The pause menu's Settings panel: WoW's own sound options — Master, Sound effects, Music and
 //! Ambience, each a volume and (but the effects) an on/off switch, the 1.12 CVars the mixer already
 //! follows and `config.toml` already keeps — and the live damage meter's switch
-//! ([`super::meter`]). Touch-sized: volumes step in tens with − and +.
+//! ([`super::meter`]), the frame cap and the world's upscaler ([`super::upscale`]). Touch-sized: volumes step in tens with − and +.
 
 use bevy::prelude::*;
 
@@ -9,6 +9,7 @@ use super::framecap::FrameCap;
 use super::hud::{HudFont, UiAction};
 use super::meter::{save_setting, MeterSetting};
 use super::units::DamageNumbers;
+use super::upscale::Upscaler;
 use super::Phase;
 use crate::cvars::Cvars;
 
@@ -40,6 +41,7 @@ enum SettingsButton {
     Meter,
     Numbers,
     FrameCap,
+    Upscaler,
     Back,
 }
 
@@ -51,6 +53,7 @@ enum Readout {
     Meter,
     Numbers,
     FrameCap,
+    Upscaler,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -256,6 +259,29 @@ fn spawn_panel(commands: &mut Commands, font: &Handle<Font>) {
                 );
             });
             root.spawn(Node {
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: Val::Px(310.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|c| {
+                    c.spawn(text(font, "Upscaler", 18.0, Color::WHITE));
+                });
+                button(
+                    row,
+                    SettingsButton::Upscaler,
+                    70.0,
+                    (text(font, "", 16.0, Color::WHITE), Readout::Upscaler),
+                );
+            });
+            root.spawn(Node {
                 height: Val::Px(8.0),
                 ..default()
             });
@@ -321,6 +347,9 @@ fn press(
             SettingsButton::FrameCap => {
                 FrameCap::cycle();
             }
+            SettingsButton::Upscaler => {
+                Upscaler::cycle();
+            }
             SettingsButton::Back => open.0 = false,
         }
     }
@@ -365,6 +394,7 @@ fn readouts(
             Readout::Meter => on_off(meter.live),
             Readout::Numbers => DamageNumbers::current().name().to_string(),
             Readout::FrameCap => FrameCap::current().name().to_string(),
+            Readout::Upscaler => Upscaler::current().name().to_string(),
         };
         if text.0 != want {
             text.0 = want;

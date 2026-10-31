@@ -15,7 +15,8 @@ struct FfxCombine {
     // x = zone glow weight `w` (both combines), y = FFXDeath gate (1 while a ghost, no ramp),
     // z = haze mix, w = deband dither on.
     lane: vec4<f32>,
-    // xy = the GlowWave phases `(t mod 3174)/3174` and `(t mod 2805)/2805`, t in ms; zw unused.
+    // xy = the GlowWave phases `(t mod 3174)/3174` and `(t mod 2805)/2805`, t in ms; z = the
+    // scene read's GSR edge sharpness, 0 for the plain bilinear tap ([`scene_read`]); w unused.
     wave: vec4<f32>,
 }
 @group(0) @binding(3) var<uniform> ffx: FfxCombine;
@@ -88,9 +89,89 @@ fn combine_out(outg: vec3<f32>, alpha: f32, frag_coord: vec2<f32>) -> vec4<f32> 
 #endif
 }
 
+// Carry (benilla-app survivors, `FfxUpscale`): Snapdragon Game Super Resolution 1, the one-pass
+// 12-tap upscale + edge sharpen, ported from Qualcomm's `sgsr1_shader_mobile.frag` (2025, RGBA
+// mode, no edge direction), BSD-3-Clause: `SGSR1-LICENSE.txt` beside this file. The claimed
+// combine is where a world rendered below the window meets the window's pixels, so the upscale
+// replaces its one bilinear scene tap and costs no pass of its own. Luma is the green channel,
+// gathered; `in_tex` is the world's gamma-byte main texture, so the deltas are in byte units.
+const SGSR1_EDGE_THRESHOLD: f32 = 8.0 / 255.0; // Qualcomm's mobile default (4/255 for VR)
+const SGSR1_DELTA_CLAMP: f32 = 23.0 / 255.0; // "smooth high contrast input"
+
+fn sgsr1_lanczos2(x: f32) -> f32 {
+    var wa = x - 4.0;
+    let wb = x * wa - wa;
+    wa = wa * wa;
+    return wb * wa;
+}
+
+fn sgsr1_weight(dx: f32, dy: f32, c: f32, spread: f32) -> vec2<f32> {
+    let x = (dx * dx + dy * dy) * 0.55 + clamp(abs(c) * spread, 0.0, 1.0);
+    let w = sgsr1_lanczos2(x);
+    return vec2<f32>(w, w * c);
+}
+
+// Flat pixels (most of them) keep the bilinear tap plus one gather; an edge adds four gathers.
+fn sgsr1(uv: vec2<f32>, edge_sharpness: f32) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(in_tex));
+    let texel = 1.0 / size;
+    let color = textureSampleLevel(in_tex, in_samp, uv, 0.0);
+    let img = uv * size + vec2<f32>(-0.5, 0.5);
+    let img_px = floor(img);
+    var coord = img_px * texel;
+    let pl = img - img_px;
+    var left = textureGather(1, in_tex, in_samp, coord);
+    let edge_vote = abs(left.z - left.y) + abs(color.g - left.y) + abs(color.g - left.z);
+    if edge_vote <= SGSR1_EDGE_THRESHOLD {
+        return color;
+    }
+    coord.x += texel.x;
+    var right = textureGather(1, in_tex, in_samp, coord + vec2<f32>(texel.x, 0.0));
+    var up_down = vec4<f32>(
+        textureGather(1, in_tex, in_samp, coord + vec2<f32>(0.0, -texel.y)).wz,
+        textureGather(1, in_tex, in_samp, coord + vec2<f32>(0.0, texel.y)).yx,
+    );
+    let mean = (left.y + left.z + right.x + right.w) * 0.25;
+    left -= vec4<f32>(mean);
+    right -= vec4<f32>(mean);
+    up_down -= vec4<f32>(mean);
+    let center = color.g - mean;
+    let sum = dot(abs(left), vec4<f32>(1.0)) + dot(abs(right), vec4<f32>(1.0))
+        + dot(abs(up_down), vec4<f32>(1.0));
+    // Qualcomm's `std`, renamed: a WGSL reserved word.
+    let spread = 2.181818 / sum;
+    var awy = sgsr1_weight(pl.x, pl.y + 1.0, up_down.x, spread);
+    awy += sgsr1_weight(pl.x - 1.0, pl.y + 1.0, up_down.y, spread);
+    awy += sgsr1_weight(pl.x - 1.0, pl.y - 2.0, up_down.z, spread);
+    awy += sgsr1_weight(pl.x, pl.y - 2.0, up_down.w, spread);
+    awy += sgsr1_weight(pl.x + 1.0, pl.y - 1.0, left.x, spread);
+    awy += sgsr1_weight(pl.x, pl.y - 1.0, left.y, spread);
+    awy += sgsr1_weight(pl.x, pl.y, left.z, spread);
+    awy += sgsr1_weight(pl.x + 1.0, pl.y, left.w, spread);
+    awy += sgsr1_weight(pl.x - 1.0, pl.y - 1.0, right.x, spread);
+    awy += sgsr1_weight(pl.x - 2.0, pl.y - 1.0, right.y, spread);
+    awy += sgsr1_weight(pl.x - 2.0, pl.y, right.z, spread);
+    awy += sgsr1_weight(pl.x - 1.0, pl.y, right.w, spread);
+    let max4 = max(max(left.y, left.z), max(right.x, right.w));
+    let min4 = min(min(left.y, left.z), min(right.x, right.w));
+    let final_y = clamp(edge_sharpness * awy.y / awy.x, min4, max4);
+    let delta = clamp(final_y - center, -SGSR1_DELTA_CLAMP, SGSR1_DELTA_CLAMP);
+    // Alpha passes through, as the bilinear tap's does (Qualcomm forces 1).
+    return vec4<f32>(clamp(color.rgb + vec3<f32>(delta), vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
+}
+
+// The scene tap: GSR while a sharpness is set, else the bilinear read it replaces. The branch is
+// on a uniform, so the implicit-derivative sample stays in uniform control flow.
+fn scene_read(uv: vec2<f32>) -> vec4<f32> {
+    if ffx.wave.z > 0.0 {
+        return sgsr1(uv, ffx.wave.z);
+    }
+    return textureSample(in_tex, in_samp, uv);
+}
+
 // Both combines, at the plain or the warped UV; `frag_coord` stays unwarped for the dither.
 fn combine_body(uv: vec2<f32>, frag_coord: vec2<f32>) -> vec4<f32> {
-    let scene = textureSample(in_tex, in_samp, uv);
+    let scene = scene_read(uv);
     // Clamped like the downsample taps: the screen term must saturate before the glow add.
     let sg = clamp(scene.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     let bg = max(textureSample(blur_tex, in_samp, uv).rgb, vec3<f32>(0.0));
