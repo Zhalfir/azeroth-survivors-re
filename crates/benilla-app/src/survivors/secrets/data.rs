@@ -103,8 +103,7 @@ pub(in crate::survivors) const SATYR_ZONES: [&str; 2] = ["Teldrassil", "Mount Hy
 /// The spec's "Razorfen-area zones": Razorfen Kraul and Downs lie in the southern Barrens, and
 /// the Razormane quillboar hold Durotar's and the Barrens' camps.
 pub(in crate::survivors) const QUILLBOAR_ZONES: [&str; 2] = ["The Barrens", "Durotar"];
-/// The spec's Desolace, which the game does not have: the Kolkar centaurs of the riddle also
-/// roam the Barrens. Endless mode does not exist yet, so nothing records this time.
+/// The Centaur's zone: the Kolkar centaurs of the riddle roam the Barrens.
 pub(in crate::survivors) const CENTAUR_ZONE: &str = "The Barrens";
 
 static DEFS: [SecretDef; 13] = [
@@ -186,7 +185,7 @@ static DEFS: [SecretDef; 13] = [
         scale: 0.88,
         casts: true,
         riddle: "Where the forest burns green, the corrupted wait for a hero.",
-        condition: "clear Ashenvale/Felwood on Heroic",
+        condition: "clear Teldrassil and Mount Hyjal on Heroic",
     },
     SecretDef {
         key: "furbolg",
@@ -219,7 +218,7 @@ static DEFS: [SecretDef; 13] = [
         scale: 1.0,
         casts: true,
         riddle: "The thorns remember who walked the Razorfen.",
-        condition: "clear the Razorfen-area zones",
+        condition: "clear The Barrens and Durotar",
     },
     SecretDef {
         key: "felguard",
@@ -242,7 +241,7 @@ static DEFS: [SecretDef; 13] = [
         scale: 0.85,
         casts: false,
         riddle: "The Kolkar respect only those who never stop running.",
-        condition: "survive 20 minutes in Desolace (Endless)",
+        condition: "win a run in The Barrens without ever standing still more than 3 seconds",
     },
     SecretDef {
         key: "imp",
@@ -252,8 +251,8 @@ static DEFS: [SecretDef; 13] = [
         displays: &[4449, 7552, 10811],
         scale: 0.75,
         casts: true,
-        riddle: "Faster, master, faster! Eight minutes is too long!",
-        condition: "win a run in under 8 minutes",
+        riddle: "Faster, master, faster! One minute is all the big one gets!",
+        condition: "kill the final boss within 60 seconds of its arrival",
     },
 ];
 

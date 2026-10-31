@@ -355,7 +355,8 @@ fn offer_entry(
     mut entry: ResMut<Entry>,
 ) {
     entry.pending = None;
-    if auto.is_some() || run.kills == 0 {
+    if !super::secrets::records_progress(auto.is_some(), super::hero::god_mode()) || run.kills == 0
+    {
         return;
     }
     let map = data::MAPS[selection.stage.min(data::MAPS.len() - 1)].name;

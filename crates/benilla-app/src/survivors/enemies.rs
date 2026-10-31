@@ -227,6 +227,9 @@ pub(super) fn spawn_enemies(
             hpos.y,
         );
         spawn_enemy(&mut commands, &mut run, def, pos, hpos, true, is_final, 1.0);
+        if is_final {
+            run.final_boss_at = Some(elapsed);
+        }
         super::combatlog::event(
             elapsed,
             format!(

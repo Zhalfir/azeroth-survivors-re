@@ -373,6 +373,11 @@ pub(super) struct Run {
     pub banner: Option<(String, f32)>,
     /// The hero's lowest health this run, as a share of the pool (`secrets`: the Furbolg).
     pub min_hp_frac: f32,
+    /// Run time the final boss arrived, and fell (`secrets`: the Imp).
+    pub final_boss_at: Option<f32>,
+    pub won_at: Option<f32>,
+    /// The longest the hero stood still (`secrets`: the Centaur).
+    pub(in crate::survivors) stillness: secrets::Stillness,
 }
 
 impl Default for Run {
@@ -411,6 +416,9 @@ impl Default for Run {
             version: 0,
             banner: None,
             min_hp_frac: 1.0,
+            final_boss_at: None,
+            won_at: None,
+            stillness: secrets::Stillness::default(),
         }
     }
 }

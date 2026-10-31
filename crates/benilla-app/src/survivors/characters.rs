@@ -1018,8 +1018,8 @@ fn record_completion(
     auto: Option<Res<super::auto::Auto>>,
 ) {
     let mut line = String::new();
-    // An unattended run never completes a map for the character on the menu.
-    if run.won && auto.is_none() {
+    // An unattended or god-mode run never completes a map for the character on the menu.
+    if run.won && super::secrets::records_progress(auto.is_some(), super::hero::god_mode()) {
         let difficulty = data::difficulty();
         let map = data::MAPS[selection.stage.min(data::MAPS.len() - 1)].name;
         if let Some(c) = selection
