@@ -588,7 +588,7 @@ fn rebuild(
                 let total = tree_total(&c.talents[t]);
                 cols.spawn((
                     Node {
-                        width: Val::Px(312.0),
+                        width: Val::Px(334.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(6.0),
                         padding: UiRect::all(Val::Px(10.0)),
@@ -630,7 +630,7 @@ fn rebuild(
                         } else {
                             DIM.with_alpha(0.4)
                         };
-                        col.spawn(button_bundle(TalentButton::Add(t, r), 290.0, 84.0, edge))
+                        col.spawn(button_bundle(TalentButton::Add(t, r), 312.0, 84.0, edge))
                         .with_children(|b| {
                             b.spawn((
                                 Node {
@@ -649,7 +649,7 @@ fn rebuild(
                             b.spawn((
                                 Node {
                                     // A fixed width so the effect line wraps inside the button.
-                                    width: Val::Px(232.0),
+                                    width: Val::Px(254.0),
                                     flex_direction: FlexDirection::Column,
                                     ..default()
                                 },

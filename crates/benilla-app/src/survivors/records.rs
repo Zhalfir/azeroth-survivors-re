@@ -270,7 +270,8 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(En
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.92)),
-            GlobalZIndex(120),
+            // Over the menu screen (410), so its zone list and buttons never show through.
+            GlobalZIndex(455),
         ))
         .with_children(|root| {
             root.spawn(text(f, "RECORDS", 44.0, GOLD));
@@ -451,6 +452,7 @@ fn show(
     phase: Res<State<Phase>>,
     entry: Res<Entry>,
     mut page: ResMut<Page>,
+    selection: Res<crate::survivors::Selection>,
     mut nodes: ParamSet<(
         Query<&mut Node, With<EntryRoot>>,
         Query<&mut Node, With<PageRoot>>,
@@ -474,8 +476,10 @@ fn show(
     for n in &mut nodes.p1() {
         set(n, menu && page.open);
     }
+    // Create Character has no opener, as for Talents and Secrets.
+    let listing = selection.character.is_some();
     for n in &mut nodes.p2() {
-        set(n, menu && !page.open);
+        set(n, menu && listing && !page.open);
     }
 }
 

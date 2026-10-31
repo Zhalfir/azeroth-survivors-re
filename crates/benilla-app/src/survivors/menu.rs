@@ -164,7 +164,9 @@ pub(super) fn restore_pick(
         selection.stage = map;
         selection.version += 1;
     }
-    if class < data::CLASSES.len() {
+    // A character already chosen owns the look; the saved create-screen pick must not repaint
+    // it (launch showed one character highlighted and another's model and name).
+    if class < data::CLASSES.len() && selection.character.is_none() {
         let all = all_looks(creatures, &progress.unlocked);
         if let Some(l) = find(&all[class], Some(race as u8), Some(sex as u8)) {
             set(&mut selection, &all, class, l);
