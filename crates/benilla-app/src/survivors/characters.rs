@@ -932,7 +932,16 @@ fn refresh_labels(
             Without<CountLabel>,
         ),
     >,
-    mut reasons: Query<(&mut Node, &mut Text), (With<LockReason>, Without<MenuAction>)>,
+    mut reasons: Query<
+        (&mut Node, &mut Text),
+        (
+            With<LockReason>,
+            Without<MenuAction>,
+            Without<NewName>,
+            Without<DeleteLabel>,
+            Without<CountLabel>,
+        ),
+    >,
     mut label_colors: Query<&mut TextColor, (Without<ZoneMark>, Without<LockReason>)>,
     unlocks: Res<Unlocks>,
 ) {
