@@ -27,6 +27,7 @@ mod meter;
 mod minimap;
 mod mobility;
 mod records;
+mod secrets;
 mod settings;
 mod talents;
 #[cfg(target_os = "android")]
