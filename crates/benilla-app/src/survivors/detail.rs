@@ -1,13 +1,14 @@
 //! The horde's per-enemy detail: what each survivors enemy costs the engine besides its body.
-//! The engine pays per unit for a blob shadow and footprints; at 220 enemies on a tablet that is
-//! the frame. The enemies opt out through the engine's own markers; the hero and the bosses keep
-//! their full detail.
+//! The engine pays per unit for a blob shadow, footprints and footstep lookups; at 220 enemies on
+//! a tablet that is the frame. The enemies opt out through the engine's own markers and budgets;
+//! the hero and the bosses keep their full detail.
 
 use bevy::prelude::*;
 
 use super::enemies::Enemy;
 use crate::blob_shadow::{NoUnitShadow, ShadowReproject};
 use crate::footprints::NoFootprints;
+use crate::sound::footsteps::FootstepHearing;
 
 /// A shadowed unit walks this far (yd), or turns this far, before its shadow is re-projected; in
 /// between it slides. A blob is a soft oval, so a quarter yard of terrain mismatch does not show.
@@ -16,8 +17,13 @@ const SHADOW_SLIDE: ShadowReproject = ShadowReproject {
     turn: 5.0 * std::f32::consts::PI / 180.0,
 };
 
+/// Footfalls farther than this from the listener (at the hero) are not looked up: the mixer
+/// refused ~900 of them per 5 s anyway, inaudible under the hero's own effects.
+const HEARING: f32 = 18.0;
+
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(SHADOW_SLIDE)
+        .insert_resource(FootstepHearing(HEARING))
         .add_systems(Update, crowd_decals);
 }
 

@@ -55,6 +55,17 @@ use super::{AudioListener, SoundConfig, SoundOutput};
 #[derive(Resource)]
 pub(crate) struct Footsteps(pub(crate) FootstepCatalog);
 
+/// Carry (survivors): footfalls farther than this (yd) from the listener are dropped before any
+/// foley, terrain or water lookup. A game with a crowd inserts it; the client never does, so every
+/// footfall is looked up as before and the mixer's own distance law decides.
+#[derive(Resource, Clone, Copy)]
+pub(crate) struct FootstepHearing(pub(crate) f32);
+
+/// Whether a footfall at `at` is beyond `hearing` of the listener; no hearing hears all.
+pub(crate) fn beyond_hearing(hearing: Option<FootstepHearing>, listener: Vec3, at: Vec3) -> bool {
+    hearing.is_some_and(|h| listener.distance_squared(at) > h.0 * h.0)
+}
+
 /// The foley's height above the unit's origin (`0x45851d fadd [0x801628]`), a fixed lift, not
 /// model-derived; WoW's Z is Bevy's Y.
 const FOLEY_HEIGHT: f32 = 2.0;
@@ -95,11 +106,13 @@ fn footstep_sounds(
     assets: Option<Res<WorldAssets>>,
     mut out: NonSendMut<SoundOutput>,
     config: Res<SoundConfig>,
-    listener: Res<AudioListener>,
+    // The listener, and the survivors carry's hearing range, one tuple for the ceiling.
+    (listener, hearing): (Res<AudioListener>, Option<Res<FootstepHearing>>),
 ) {
     if events.is_empty() {
         return;
     }
+    let hearing = hearing.as_deref().copied();
     let (materials, creatures) = foley;
     let (Some(footsteps), Some(voices), Some(mut kits), Some(assets)) =
         (footsteps, voices, kits, assets)
@@ -114,6 +127,9 @@ fn footstep_sounds(
         let Ok((net, transform, collision)) = units.get(ev.entity) else {
             continue;
         };
+        if beyond_hearing(hearing, listener, ev.pos.unwrap_or(transform.translation())) {
+            continue;
+        }
         // The state gates on the root unit: hover, stealth, player ghost.
         let mut root = ev.entity;
         while let Ok(child_of) = parents.get(root) {
@@ -222,4 +238,21 @@ fn footstep_sounds(
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, load_footsteps.after(AssetSet::Open))
         .add_systems(Update, footstep_sounds.in_set(WorldStage::Present));
+}
+
+#[cfg(test)]
+mod hearing_tests {
+    use super::*;
+
+    /// The carry drops only past its range; without it every footfall is looked up.
+    #[test]
+    fn footfalls_past_the_hearing_range_drop_and_none_hears_all() {
+        let ear = Vec3::new(10.0, 2.0, -4.0);
+        let near = ear + Vec3::new(17.9, 0.0, 0.0);
+        let far = ear + Vec3::new(0.0, 0.0, 18.1);
+        let h = Some(FootstepHearing(18.0));
+        assert!(!beyond_hearing(h, ear, near));
+        assert!(beyond_hearing(h, ear, far));
+        assert!(!beyond_hearing(None, ear, ear + Vec3::X * 500.0));
+    }
 }
