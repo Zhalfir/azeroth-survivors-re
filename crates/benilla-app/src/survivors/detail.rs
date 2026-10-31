@@ -1,10 +1,11 @@
 //! The horde's per-enemy detail: what each survivors enemy costs the engine besides its body.
-//! The engine pays per unit for a blob shadow, footprints, footstep lookups, pose evaluation and
-//! event keys; at 220 enemies on a tablet that is the frame. The enemies opt out through the
-//! engine's own markers and budgets; the hero and the bosses keep their full detail.
+//! The engine pays per unit for a blob shadow, footprints, footstep lookups, pose evaluation,
+//! event keys and room rays; at 220 enemies on a tablet that is the frame. The enemies opt out
+//! through the engine's own markers and budgets; the hero and the bosses keep their full detail.
 
 use benilla_world::rig_anim::AnimHalfRate;
 use benilla_world::view::WorldCamera;
+use benilla_world::wmo_portal::{RoomCastFocus, RoomCastOptional};
 use bevy::prelude::*;
 
 use super::enemies::Enemy;
@@ -40,10 +41,14 @@ const TINY_EXIT: f32 = 0.012;
 const MUTE_ENTER: f32 = HEARING;
 const MUTE_EXIT: f32 = 16.0;
 
+/// Enemies are culled past 75 yd of the hero (`enemies::move_enemies`); a building whose bounds
+/// reach within this of the hero may hold one, so their room rays run.
+const ROOM_FOCUS_RADIUS: f32 = 80.0;
+
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(SHADOW_SLIDE)
         .insert_resource(FootstepHearing(HEARING))
-        .add_systems(Update, (crowd_decals, crowd_anim_lod));
+        .add_systems(Update, (crowd_decals, crowd_anim_lod, room_focus));
 }
 
 /// Whether ordinary enemies keep their shadow and footprints: only on High. Off Android there is
@@ -164,6 +169,32 @@ fn crowd_anim_lod(
                 commands.entity(entity).try_remove::<AnimEventsMuted>();
             }
         }
+    }
+}
+
+/// Enemies fight in the open: each skips its WMO room ray while no building is within
+/// [`ROOM_FOCUS_RADIUS`] of the hero, the focus kept on the hero.
+fn room_focus(
+    mut commands: Commands,
+    hero: Query<&Transform, With<Hero>>,
+    fresh: Query<Entity, Added<Enemy>>,
+    focus: Option<ResMut<RoomCastFocus>>,
+) {
+    for entity in &fresh {
+        commands.entity(entity).try_insert(RoomCastOptional);
+    }
+    let Ok(hero) = hero.single() else { return };
+    let next = RoomCastFocus {
+        center: hero.translation,
+        radius: ROOM_FOCUS_RADIUS,
+    };
+    match focus {
+        Some(mut f) => {
+            if f.center != next.center {
+                *f = next;
+            }
+        }
+        None => commands.insert_resource(next),
     }
 }
 

@@ -211,6 +211,56 @@ pub(super) fn track_current_interior(
     }
 }
 
+/// Carry (survivors): a unit carrying this skips its room ray while no WMO is near the game's
+/// [`RoomCastFocus`]; a crowd fighting in the open has no room to find. The client never adds it,
+/// so every unit is rayed as before.
+#[derive(Component)]
+pub struct RoomCastOptional;
+
+/// Carry (survivors): where the [`RoomCastOptional`] units are, a centre and the reach (yd) they
+/// stay within. Absent, every optional unit is rayed.
+#[derive(Resource, Clone, Copy)]
+pub struct RoomCastFocus {
+    pub center: Vec3,
+    pub radius: f32,
+}
+
+/// Whether a building's bounding sphere (`center`, `radius`, world yd) reaches into the focus.
+pub(crate) fn building_near(focus: RoomCastFocus, center: Vec3, radius: f32) -> bool {
+    focus.center.distance(center) <= focus.radius + radius
+}
+
+/// Whether any resident building with collision faces reaches into the focus: its collision box,
+/// as a sphere, through its placement.
+fn any_building_near(
+    focus: RoomCastFocus,
+    wmos: &Assets<WmoModel>,
+    instances: &Query<(Entity, &WmoPortalInstance)>,
+) -> bool {
+    instances.iter().any(|(_, inst)| {
+        let Some(model) = wmos.get(&inst.handle) else {
+            // Not loaded yet: assume near, so nothing is skipped on a guess.
+            return true;
+        };
+        let Some((min, max)) = model.collision_bounds else {
+            return false; // no face can own a column
+        };
+        let (min, max) = (wow_to_bevy(min), wow_to_bevy(max));
+        let m = inst.world_from_local;
+        let scale = m
+            .matrix3
+            .x_axis
+            .length()
+            .max(m.matrix3.y_axis.length())
+            .max(m.matrix3.z_axis.length());
+        building_near(
+            focus,
+            m.transform_point3((min + max) * 0.5),
+            (max - min).length() * 0.5 * scale,
+        )
+    })
+}
+
 /// Squared distance (yd²) a unit must move before its room is re-rayed: a room changes at doorways,
 /// so the claim may lag a transition by this much, well inside the wade band.
 const UNIT_ROOM_RESAMPLE_DIST_SQ: f32 = 0.25 * 0.25;
@@ -231,10 +281,23 @@ pub(super) fn track_unit_interiors(
         &GlobalTransform,
         &crate::world_unit::WorldUnit,
         Option<&mut UnitWmoRoom>,
+        Has<RoomCastOptional>,
     )>,
+    focus: Option<Res<RoomCastFocus>>,
 ) {
     let generation = residency.generation();
-    for (entity, transform, body, claim) in &mut units {
+    // Carry (survivors): with no building near the focus the optional units stand outdoors.
+    let skip_optional = focus.is_some_and(|f| !any_building_near(*f, &wmos, &instances));
+    for (entity, transform, body, claim, optional) in &mut units {
+        if optional && skip_optional {
+            // A claim left from a building it walked out of would mislead its consumers.
+            if let Some(mut claim) = claim {
+                if claim.room.is_some() {
+                    claim.room = None;
+                }
+            }
+            continue;
+        }
         // World position, not the local one: a mounted unit's `Transform` is seat-relative.
         let pos = transform.translation();
         // A settled unit keeps its room; the generation leg re-claims one a building streamed in
