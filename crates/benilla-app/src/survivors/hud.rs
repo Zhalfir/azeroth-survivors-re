@@ -48,6 +48,9 @@ pub(super) struct LevelText;
 pub(super) struct TimerText;
 #[derive(Component)]
 pub(super) struct KillText;
+/// "Demo", under the clock while the bot plays ([`demo_label`]).
+#[derive(Component)]
+pub(super) struct DemoLabel;
 #[derive(Component)]
 pub(super) struct HpFrame;
 #[derive(Component)]
@@ -533,6 +536,14 @@ pub(super) fn setup_hud(
                         line.spawn((LevelText, text(f, "Level 1", 14.0, GOLD)));
                         line.spawn((KillText, text(f, "Kills 0", 14.0, Color::WHITE)));
                     });
+                    col.spawn((
+                        DemoLabel,
+                        Node {
+                            display: Display::None,
+                            ..default()
+                        },
+                        text(f, "Demo", 14.0, GOLD),
+                    ));
                 });
                 // The minimap cluster's column.
                 row.spawn(Node {
@@ -1167,6 +1178,23 @@ pub(super) fn buttons(
                     _ => {}
                 }
             }
+        }
+    }
+}
+
+/// The "Demo" tag shows while the menu's bot plays, so a watcher knows the run is not theirs.
+pub(super) fn demo_label(
+    auto: Option<Res<super::auto::Auto>>,
+    mut labels: Query<&mut Node, With<DemoLabel>>,
+) {
+    let display = if auto.is_some_and(|a| a.is_demo()) {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut labels {
+        if node.display != display {
+            node.display = display;
         }
     }
 }

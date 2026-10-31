@@ -45,6 +45,9 @@ pub(super) enum MenuAction {
     Map(usize),
     Randomize,
     Enter,
+    /// The bot plays the picked class and map ([`super::auto::for_demo`]); Enter World stays the
+    /// player's own run.
+    Demo,
 }
 
 /// On [`MenuRoot`] once the glue art is in and the screen is built.
@@ -215,6 +218,27 @@ pub(super) fn build_menu(
                 GlueBtnKind::Normal,
                 1.0,
             );
+            // Demo sits to Enter World's right, centred on its height.
+            c.spawn(Node {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                margin: UiRect::left(Val::Px(120.0)),
+                top: Val::Px(11.0),
+                ..default()
+            })
+            .with_children(|demo| {
+                glue_button(
+                    demo,
+                    &art,
+                    f,
+                    MenuAction::Demo,
+                    "Demo",
+                    150.0,
+                    38.0,
+                    GlueBtnKind::Small,
+                    1.0,
+                );
+            });
         });
     });
 }
@@ -542,6 +566,7 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn menu_clicks(
+    mut commands: Commands,
     clicks: Res<GlueClicks>,
     actions: Query<(Entity, &MenuAction)>,
     phase: Res<State<Phase>>,
@@ -583,6 +608,20 @@ pub(super) fn menu_clicks(
         MenuAction::Enter => {
             if selection.character.is_some() && start_run(&mut run, &mut selection) {
                 next.set(Phase::Playing);
+            }
+        }
+        // The same start as Enter World; the bot is the only difference, on Normal and recording
+        // nothing for the character (the `Auto` checks in `characters`, `records` and `talents`).
+        MenuAction::Demo => {
+            if let (true, Some(class)) = (selection.character.is_some(), selection.class) {
+                let (map, picked) = (selection.map, selection.difficulty);
+                selection.difficulty = data::Difficulty::Normal;
+                if start_run(&mut run, &mut selection) {
+                    commands.insert_resource(super::auto::for_demo(class, map).restoring(picked));
+                    next.set(Phase::Playing);
+                } else {
+                    selection.difficulty = picked;
+                }
             }
         }
         MenuAction::Randomize => {
@@ -670,7 +709,7 @@ pub(super) fn refresh_menu_ui(
             MenuAction::Sex(s) => cur.is_some_and(|c| c.1 == s),
             MenuAction::Class(i) => selection.class == Some(i),
             MenuAction::Map(i) => selection.map == i,
-            MenuAction::Randomize | MenuAction::Enter => false,
+            MenuAction::Randomize | MenuAction::Enter | MenuAction::Demo => false,
         };
         if let Some(mut lock) = lock {
             if lock.0 != selected {
@@ -678,7 +717,7 @@ pub(super) fn refresh_menu_ui(
             }
         }
         if let Some(mut disabled) = disabled {
-            let off = *action == MenuAction::Enter && cur.is_none();
+            let off = matches!(*action, MenuAction::Enter | MenuAction::Demo) && cur.is_none();
             if disabled.0 != off {
                 disabled.0 = off;
             }

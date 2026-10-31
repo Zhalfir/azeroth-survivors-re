@@ -38,6 +38,12 @@ pub(super) struct Auto {
     hp_frac: f32,
     /// The screens already captured once: the menu, the first level-ups, the results.
     seen: Vec<String>,
+    /// The main menu's Demo button started this run (`for_demo`): the player is watching, so
+    /// nothing is recorded for the character and the bot is gone once the run is left
+    /// ([`end_demo`]). A run the environment started (`from_env`) stays the process's.
+    demo: bool,
+    /// The difficulty the menu held before a demo forced Normal, put back by [`end_demo`].
+    restore: data::Difficulty,
 }
 
 impl Auto {
@@ -95,23 +101,79 @@ pub(super) fn from_env() -> Option<Auto> {
     if let Some(dir) = &shots {
         let _ = std::fs::create_dir_all(dir);
     }
-    Some(Auto {
-        class,
-        map,
-        difficulty,
-        idle,
-        all,
-        late,
-        frames: 0,
-        wait: 0.0,
-        shots,
-        shot_t: 3.0,
-        shot_n: 0,
-        log_t: 0.0,
-        dir: Vec3::ZERO,
-        hp_frac: 1.0,
-        seen: Vec::new(),
-    })
+    Some(Auto::new(class, map, difficulty, (idle, all, late), shots))
+}
+
+impl Auto {
+    fn new(
+        class: usize,
+        map: usize,
+        difficulty: data::Difficulty,
+        (idle, all, late): (bool, bool, bool),
+        shots: Option<std::path::PathBuf>,
+    ) -> Self {
+        Auto {
+            class,
+            map,
+            difficulty,
+            idle,
+            all,
+            late,
+            frames: 0,
+            wait: 0.0,
+            shots,
+            shot_t: 3.0,
+            shot_n: 0,
+            log_t: 0.0,
+            dir: Vec3::ZERO,
+            hp_frac: 1.0,
+            seen: Vec::new(),
+            demo: false,
+            restore: data::Difficulty::Normal,
+        }
+    }
+
+    /// Whether the main menu's Demo button started this run.
+    pub(super) fn is_demo(&self) -> bool {
+        self.demo
+    }
+
+    /// Remembers the difficulty the menu held, for [`end_demo`] to put back.
+    pub(super) fn restoring(mut self, difficulty: data::Difficulty) -> Self {
+        self.restore = difficulty;
+        self
+    }
+}
+
+/// The main menu's Demo button: the bot plays the selected class and map on Normal, the same
+/// defaults as [`from_env`] with no `:idle`, `:all` or `:late` and no screenshots. The menu
+/// starts the run itself (as Enter World does), so the bot only steers and picks cards.
+pub(super) fn for_demo(class: usize, map: usize) -> Auto {
+    Auto {
+        demo: true,
+        ..Auto::new(
+            class,
+            map,
+            data::Difficulty::Normal,
+            (false, false, false),
+            None,
+        )
+    }
+}
+
+/// Back at the menu, a demo is over: the next Play is the player's own run, so the bot goes and
+/// the difficulty the player had picked returns. A run from `WOW_SURVIVORS_AUTO` stays.
+pub(super) fn end_demo(
+    mut commands: Commands,
+    auto: Option<Res<Auto>>,
+    mut selection: ResMut<Selection>,
+) {
+    let Some(auto) = auto.filter(|a| a.demo) else {
+        return;
+    };
+    selection.difficulty = auto.restore;
+    selection.version += 1;
+    commands.remove_resource::<Auto>();
 }
 
 /// The walk the autopilot steers, for [`super::hero::drive_hero`].
@@ -362,5 +424,47 @@ pub(super) fn drive(
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(path));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn demo_defaults() {
+        let a = for_demo(2, 1);
+        assert_eq!((a.class, a.map), (2, 1));
+        assert_eq!(a.difficulty, data::Difficulty::Normal);
+        assert!(!a.idle && !a.all && !a.late);
+        assert!(a.shots.is_none());
+        assert!(a.is_demo());
+    }
+
+    #[test]
+    fn leaving_a_demo_removes_the_bot_and_restores_the_pick() {
+        let mut world = World::new();
+        world.insert_resource(Selection {
+            difficulty: data::Difficulty::Normal,
+            ..default()
+        });
+        world.insert_resource(for_demo(0, 0).restoring(data::Difficulty::ALL[1]));
+        world.run_system_once(end_demo).unwrap();
+        assert!(world.get_resource::<Auto>().is_none());
+        assert_eq!(
+            world.resource::<Selection>().difficulty,
+            data::Difficulty::ALL[1]
+        );
+    }
+
+    #[test]
+    fn leaving_an_env_run_keeps_the_bot() {
+        let mut world = World::new();
+        world.insert_resource(Selection::default());
+        let env = Auto::new(0, 0, data::Difficulty::Normal, (false, false, false), None);
+        world.insert_resource(env);
+        world.run_system_once(end_demo).unwrap();
+        assert!(world.get_resource::<Auto>().is_some());
     }
 }

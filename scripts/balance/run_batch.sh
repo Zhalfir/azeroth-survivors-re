@@ -8,6 +8,10 @@
 ROUND=$1; N=$2; MAP=$3; DIFF=$4; shift 4
 ADB=/opt/homebrew/share/android-commandlinetools/platform-tools/adb
 D=/sdcard/Android/data/local.azeroth.survivors/files
+# A killed batch must not leave android-env.txt behind: with it, every later launch is the bot.
+trap '$ADB shell rm -f $D/android-env.txt >/dev/null 2>&1' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 R=$D/benilla-config/Diagnostics/runs
 OUT=${BALANCE_DIR:-balance}/$ROUND
 mkdir -p "$OUT"

@@ -149,6 +149,7 @@ impl Plugin for SurvivorsPlugin {
                     hud::xp_hover,
                     hud::icon_tooltip,
                     hud::hero_plate,
+                    hud::demo_label,
                     minimap::map_buttons,
                     minimap::zone_text,
                     minimap::compose,
@@ -163,14 +164,25 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
         #[cfg(target_os = "android")]
         app.add_plugins((touch::plugin, graphics::plugin));
+        // The bot's systems always exist: `WOW_SURVIVORS_AUTO` inserts `Auto` at boot, the menu's
+        // Demo button inserts it for one run, and they idle while it is absent.
         if let Some(auto) = auto::from_env() {
-            app.insert_resource(auto)
-                .add_systems(
-                    Update,
-                    auto::drive.after(hud::keys).before(hud::refresh_menu),
-                )
-                .add_systems(Update, auto::plan.before(WorldStage::Input));
+            app.insert_resource(auto);
         }
+        app.add_systems(
+            Update,
+            auto::drive
+                .after(hud::keys)
+                .before(hud::refresh_menu)
+                .run_if(resource_exists::<auto::Auto>),
+        )
+        .add_systems(
+            Update,
+            auto::plan
+                .before(WorldStage::Input)
+                .run_if(resource_exists::<auto::Auto>),
+        )
+        .add_systems(OnEnter(Phase::Menu), auto::end_demo.after(reset_run));
     }
 }
 
