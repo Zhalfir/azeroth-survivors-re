@@ -108,8 +108,10 @@ const RING_MAX: usize = 70;
 const RING_MARGIN: usize = 40;
 const RING_MIN: usize = 10;
 const RING_HEALTH: f32 = 0.5;
-/// The horde's cap is divided by this while the final boss stands.
-const FINAL_CROWD_DIVISOR: usize = 3;
+/// The horde's cap is divided by this while the final boss stands: ~36 of 220. A third left a
+/// Normal Warrior's final fight to ~73 adds that did the killing while the boss stood at 92 %
+/// (the user's run, tablet, 2026-10-31).
+const FINAL_CROWD_DIVISOR: usize = 6;
 /// The final boss's pace: near the hero's own, so it closes in. Slower, it could be outrun for
 /// the whole fight (round 2: 40 s at 100%, 23 to 36 yd away).
 const FINAL_BOSS_SPEED: f32 = 6.3;
@@ -578,9 +580,10 @@ pub(super) fn drop_loot(
     let mut count = gems.iter().count();
     for d in drops.read() {
         // A boss leaves a full heal and a chest; the horde, now and then, a quarter of the
-        // health pool, rarer on the harder difficulties.
+        // health pool, rarer on the harder difficulties. Normal was 1.5 %; a reasonable Normal
+        // Warrior run still dropped to 15/262 at 5:00 (the user's run, 2026-10-31).
         let potion_chance = match data::difficulty() {
-            data::Difficulty::Normal => 0.015,
+            data::Difficulty::Normal => 0.025,
             data::Difficulty::Heroic => 0.011,
             data::Difficulty::Mythic => 0.007,
         };
