@@ -229,6 +229,12 @@ pub fn run_with(build: BuildId, extend: impl FnOnce(&mut App)) -> AppExit {
 /// battleground ([`survivors`]), called by the `warcraft-survivors` launcher.
 pub fn run_survivors(build: BuildId) -> AppExit {
     survivors::ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+    // The caller's thread becomes the app's main thread, the frame's critical path; on Android
+    // nothing else promotes it (macOS already runs it user-interactive). See `thread_qos`.
+    #[cfg(target_os = "android")]
+    benilla_world::thread_qos::promote_current_thread(
+        benilla_world::thread_qos::QosClass::UserInteractive,
+    );
     launch(build, None)
 }
 
@@ -432,13 +438,23 @@ fn launch(build: BuildId, extend: Option<Extension<'_>>) -> AppExit {
     .add_plugins(perf::FpsJournalPlugin)
     // The game as one group on top of the engine; `game_plugins.rs` has its members, its
     // load-bearing ordering edges and the test that builds it headless.
-    .add_plugins(game_plugins::GamePlugins {
-        connect: !capturing && !survivors,
-        start: if survivors {
-            char_select::ClientState::InWorld
+    .add_plugins({
+        let game = game_plugins::GamePlugins {
+            connect: !capturing && !survivors,
+            start: if survivors {
+                char_select::ClientState::InWorld
+            } else {
+                run_mode::start_state()
+            },
+        }
+        .build();
+        // Survivors disables the client features it never reaches (`survivors_lean`);
+        // `WOW_SURVIVORS_FULL=1` keeps them all, the A/B lever.
+        if survivors && webenv::var("WOW_SURVIVORS_FULL").as_deref() != Some("1") {
+            game_plugins::survivors_lean(game)
         } else {
-            run_mode::start_state()
-        },
+            game
+        }
     });
     if survivors {
         app.add_plugins(survivors::SurvivorsPlugin);

@@ -253,6 +253,73 @@ impl PluginGroup for GamePlugins {
     }
 }
 
+/// Survivors' lean set: the members the survival mode never reaches, **disabled** (not removed),
+/// so their per-frame systems stop costing the main thread. Every plugin stays in [`GamePlugins`]
+/// and the normal client loads all of them; `WOW_SURVIVORS_FULL=1` loads them all in survivors too
+/// (the A/B lever). The tablet's main thread ran at ~81 % of one core with a ~12 ms fixed cost per
+/// frame (2026-10-31); a static survey (`.superpowers/sdd/…/b3a-plugin-survey.md`) checked each
+/// entry for consumers. Pairs that share a resource go together. Not here, though unused: the
+/// Lua UI, Video, the text guards and everything `net` pins (they insert resources kept plugins
+/// read), and the visible blob shadow, bowstring and footprints.
+pub(crate) fn survivors_lean(group: PluginGroupBuilder) -> PluginGroupBuilder {
+    group
+        // No server: no quest givers, combat-log feed, area triggers or world states.
+        .disable::<QuestMarkersPlugin>()
+        .disable::<crate::combat_log::CombatLogPlugin>()
+        .disable::<crate::area_trigger::AreaTriggerPlugin>()
+        .disable::<crate::area_poi::AreaPoiPlugin>()
+        // No boats or lifts in a battleground run (a 7-system chain every frame).
+        .disable::<TransportPlugin>()
+        // A tablet has no cursor art to swap; survivors draws no WoW cursor.
+        .disable::<CursorPlugin>()
+        .disable::<FishingLinePlugin>()
+        // WoW's character creation; survivors has its own pick screen.
+        .disable::<crate::char_create::CharCreatePlugin>()
+        .disable::<crate::game_tip::GameTipPlugin>()
+        // Battlegrounds' scoreboards and map positions, with the world-state and map UIs they read.
+        .disable::<BattlefieldPlugin>()
+        .disable::<BattlefieldScorePlugin>()
+        .disable::<crate::world_state_ui::WorldStateUiPlugin>()
+        .disable::<BattlefieldPositionsPlugin>()
+        .disable::<crate::ui_world_map::WorldMapUiPlugin>()
+        // WoW's floating unit names and raid marks; survivors draws its own hero bar (`hud.rs`).
+        .disable::<crate::nameplates::NameplatesPlugin>()
+        .disable::<crate::raid_marks::RaidMarksPlugin>()
+        // WoW UI leaves nothing in survivors opens: tooltips (survivors has `hud::icon_tooltip`),
+        // the character, reputation, inspect/honor, dress-up, talent and shapeshift panes, pets.
+        .disable::<UiTooltipPlugin>()
+        .disable::<UiCharPlugin>()
+        .disable::<crate::ui_reputation::UiReputationPlugin>()
+        .disable::<crate::ui_inspect::InspectUiPlugin>()
+        .disable::<crate::ui_honor::UiHonorPlugin>()
+        .disable::<crate::ui_dressup::DressUpUiPlugin>()
+        .disable::<UiTalentPlugin>()
+        .disable::<UiTalentWipePlugin>()
+        .disable::<UiShapeshiftPlugin>()
+        .disable::<UiPetBookPlugin>()
+        .disable::<UiPetStatsPlugin>()
+        .disable::<UiPetDollPlugin>()
+        // Social and economy panes with no other player or vendor to reach.
+        .disable::<UiDuelPlugin>()
+        .disable::<UiSummonPlugin>()
+        .disable::<UiGmTicketPlugin>()
+        .disable::<UiFollowPlugin>()
+        .disable::<UiInstancePlugin>()
+        .disable::<UiAuctionPlugin>()
+        .disable::<UiTradePlugin>()
+        .disable::<UiStablePlugin>()
+        .disable::<UiLootRollPlugin>()
+        .disable::<QuestSharePlugin>()
+        // The network status pane, the mirror timers, saved-variables, name persistence, the UI
+        // layout saver and the screenshot key: no server, no FrameXML session.
+        .disable::<UiNetPlugin>()
+        .disable::<UiMirrorPlugin>()
+        .disable::<UiSavedPlugin>()
+        .disable::<NamePersistPlugin>()
+        .disable::<UiLayoutPlugin>()
+        .disable::<crate::screenshot::ScreenshotPlugin>()
+}
+
 #[cfg(test)]
 pub(crate) mod schedule_tests {
     use std::any::TypeId;
@@ -267,6 +334,11 @@ pub(crate) mod schedule_tests {
     /// or GPU (`backends: None`, so no render app), then the engine, then the game. Every
     /// plugin's `build` and `finish` runs and no schedule does, which fixes the schedule graph.
     pub(crate) fn headless_client() -> App {
+        headless_client_with(false)
+    }
+
+    /// [`headless_client`], with survivors' [`survivors_lean`] set when `lean`.
+    pub(crate) fn headless_client_with(lean: bool) -> App {
         let mut app = App::new();
         app.add_plugins(
             benilla_world::boot::tuned_default_plugins(Window::default())
@@ -287,10 +359,12 @@ pub(crate) mod schedule_tests {
                 }),
         );
         app.add_plugins(benilla_world::world_plugins::WorldPlugins);
-        app.add_plugins(GamePlugins {
+        let game = GamePlugins {
             connect: false,
             start: crate::char_select::ClientState::Login,
-        });
+        }
+        .build();
+        app.add_plugins(if lean { survivors_lean(game) } else { game });
         app.finish();
         app.cleanup();
         app
@@ -634,6 +708,27 @@ pub(crate) mod schedule_tests {
     fn the_client_builds_headless() {
         let app = headless_client();
         assert!(app.world().contains_resource::<Schedules>());
+    }
+
+    /// Survivors' lean set builds and runs frames: a disabled plugin that a kept one still needs
+    /// shows up here as a missing-resource panic, not on the tablet.
+    #[test]
+    fn the_survivors_lean_set_runs_headless() {
+        let mut app = headless_client_with(true);
+        for _ in 0..3 {
+            app.update();
+        }
+        let full = headless_client_with(false);
+        let systems = |app: &App| {
+            app.world()
+                .resource::<Schedules>()
+                .get(Update)
+                .map_or(0, |s| s.systems_len())
+        };
+        assert!(
+            systems(&app) < systems(&full),
+            "the lean set should register fewer Update systems"
+        );
     }
 
     /// `PostUpdate`'s undeclared-order pairs on the declared graph; `GlobalTransform` and the
