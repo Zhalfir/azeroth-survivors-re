@@ -342,17 +342,18 @@ impl Fx<'_, '_> {
             ammo_display_id: None,
             seq,
         });
-        // After the kit (a later stamp), so the swing is what plays.
-        if self.swingers.contains(caster) {
-            if let Some(anim_id) = super::secrets::cast_fallback(false) {
-                let seq = self.seq.next();
-                self.oneshots.write(EmoteAnim {
-                    entity: caster,
-                    anim_id,
-                    seq,
-                    via_player: false,
-                });
-            }
+        // After the kit (a later stamp), so the swing is what plays; a ranged shot keeps its bow
+        // and the victory flourish its own (`secrets::swing_for_cast`).
+        if let Some(anim_id) =
+            super::secrets::swing_for_cast(self.swingers.contains(caster), spell)
+        {
+            let seq = self.seq.next();
+            self.oneshots.write(EmoteAnim {
+                entity: caster,
+                anim_id,
+                seq,
+                via_player: false,
+            });
         }
     }
 

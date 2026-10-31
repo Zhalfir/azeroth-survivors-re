@@ -673,7 +673,7 @@ pub(super) fn hero_vitals(
         marks.flush(entity, guid.0, &mut store, &mut fields);
     } else if run.won {
         // A last flourish before the results.
-        fx.cast(entity, 642, &[entity], None);
+        fx.cast(entity, super::secrets::VICTORY_FLOURISH, &[entity], None);
         next.set(Phase::GameOver);
     }
 }

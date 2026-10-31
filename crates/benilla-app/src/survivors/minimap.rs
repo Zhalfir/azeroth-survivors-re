@@ -51,6 +51,19 @@ const DUSK: u32 = 21 * 60;
 const GROUP_ALLIANCE: u32 = 2;
 const GROUP_HORDE: u32 = 4;
 
+/// The `(friendly, hostile)` faction groups for a look's race slot. Every secret race
+/// (`super::secrets`), the Goblin included, belongs to neither side: no zone reads as friendly
+/// or hostile to it, so every unflagged zone shows the contested gold.
+pub(super) fn faction_groups(race: u8) -> (u32, u32) {
+    if super::secrets::from_look_code(race).is_some() {
+        return (0, 0);
+    }
+    match race {
+        1 | 3 | 4 | 7 => (GROUP_ALLIANCE, GROUP_HORDE),
+        _ => (GROUP_HORDE, GROUP_ALLIANCE),
+    }
+}
+
 #[derive(Component)]
 pub(super) struct ZoneText;
 
@@ -330,10 +343,7 @@ pub(super) fn zone_text(
     } else {
         row.name.clone()
     };
-    let (friend, enemy) = match run.race {
-        1 | 3 | 4 | 7 => (GROUP_ALLIANCE, GROUP_HORDE),
-        _ => (GROUP_HORDE, GROUP_ALLIANCE),
-    };
+    let (friend, enemy) = faction_groups(run.race);
     let owner = areas.0.get(zone).map_or(0, |r| r.faction_group_mask);
     let color = if row.flags & 0x80 != 0 || owner & enemy != 0 {
         Color::srgb(1.0, 0.1, 0.1)

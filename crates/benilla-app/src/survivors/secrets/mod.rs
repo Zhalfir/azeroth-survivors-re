@@ -254,17 +254,28 @@ pub(super) struct Stillness {
     since: f32,
     pub longest: f32,
     last: Option<Vec3>,
+    /// Run time of the last step.
+    last_t: Option<f32>,
 }
 
-/// Less than this between two frames is standing still.
-const STILL_EPSILON: f32 = 0.01;
+/// Slower than this across the ground, in yards a second, is standing still: a speed, so the
+/// test is the same at 30 and 120 frames a second.
+const STILL_SPEED: f32 = 0.5;
 
 impl Stillness {
     pub fn step(&mut self, pos: Vec3, now: f32) {
+        let dt = self.last_t.map_or(0.0, |t| now - t);
         let moved = self.last.is_none_or(|l| {
-            Vec3::new(pos.x - l.x, 0.0, pos.z - l.z).length() > STILL_EPSILON
+            let d = Vec3::new(pos.x - l.x, 0.0, pos.z - l.z).length();
+            // No run time passed (a paused frame): only a real displacement counts as moving.
+            if dt > 0.0 {
+                d / dt > STILL_SPEED
+            } else {
+                d > 0.0
+            }
         });
         self.last = Some(pos);
+        self.last_t = Some(now);
         if moved {
             self.since = now;
         } else {
@@ -323,6 +334,22 @@ pub(super) fn cast_fallback(casts: bool) -> Option<u16> {
     (!casts).then_some(ATTACK_1H)
 }
 
+/// The run's last flourish on a win (`hero::hero_vitals`), not one of the hero's spells.
+pub(super) const VICTORY_FLOURISH: u32 = 642;
+
+/// The Hunter's shots (`data`: Arcane, Multi-, Serpent Sting, Volley, Concussive, Aimed): their
+/// kit plays the bow, which a swing would override.
+const RANGED_SPELLS: [u32; 6] = [3044, 2643, 1978, 1510, 5116, 19434];
+
+/// The one-shot a cast by `spell` adds on a caster that swings to cast ([`swings_to_cast`]):
+/// only a true spell cast swings; a ranged attack keeps its bow and the victory flourish its own.
+pub(super) fn swing_for_cast(swings: bool, spell: u32) -> Option<u16> {
+    if !swings || spell == VICTORY_FLOURISH || RANGED_SPELLS.contains(&spell) {
+        return None;
+    }
+    cast_fallback(false)
+}
+
 /// Whether a look's race slot casts with the attack swing ([`cast_fallback`]).
 pub(super) fn swings_to_cast(code: u8) -> bool {
     from_look_code(code).is_some_and(|r| cast_fallback(def(r).casts).is_some())
@@ -357,6 +384,10 @@ fn fill_secret_faces(
     mut assets: Option<ResMut<benilla_assets::WorldAssets>>,
     mut images: ResMut<Assets<Image>>,
 ) {
+    // Nothing to fill: never touch `WorldAssets`, whose `DerefMut` would mark it changed.
+    if faces.is_empty() {
+        return;
+    }
     let Some(assets) = assets.as_deref_mut() else {
         return;
     };
@@ -377,10 +408,32 @@ fn path() -> Option<std::path::PathBuf> {
 
 /// The saved progress, or a fresh one (no file, or a file that does not parse).
 pub(super) fn load() -> Progress {
-    path()
-        .and_then(|p| crate::local_state::read_to_string(&p).ok())
-        .and_then(|t| toml::from_str::<Progress>(&t).ok())
-        .unwrap_or_default()
+    path().map(|p| load_from(&p)).unwrap_or_default()
+}
+
+/// The progress at `path`. A file that is there but does not parse is kept as `<path>.bak`
+/// (an older `.bak` moves to `.bak.1`) before anything can save over it, with a warning: the
+/// account's unlocks are never lost silently.
+fn load_from(path: &std::path::Path) -> Progress {
+    let Ok(text) = crate::local_state::read_to_string(path) else {
+        return Progress::default();
+    };
+    match toml::from_str::<Progress>(&text) {
+        Ok(p) => p,
+        Err(e) => {
+            let bak = path.with_extension("toml.bak");
+            if let Ok(old) = crate::local_state::read_to_string(&bak) {
+                let _ = crate::local_state::write_atomic(&path.with_extension("toml.bak.1"), &old);
+            }
+            let kept = crate::local_state::write_atomic(&bak, &text);
+            warn!(
+                "survivors: {} does not parse ({e}); kept as {} ({kept:?}), starting fresh",
+                path.display(),
+                bak.display()
+            );
+            Progress::default()
+        }
+    }
 }
 
 pub(super) fn save(p: &Progress) {
@@ -480,7 +533,13 @@ pub(super) fn count(
         match *e {
             SecretEvent::Kill(name) => {
                 if let Some(f) = family(name) {
-                    *p.kills_by_family.entry(f.to_string()).or_default() += 1;
+                    // `get_mut` first: no allocation on the thousands of kills after the first.
+                    match p.kills_by_family.get_mut(f) {
+                        Some(n) => *n += 1,
+                        None => {
+                            p.kills_by_family.insert(f.to_string(), 1);
+                        }
+                    }
                     counted = true;
                 }
             }
@@ -696,6 +755,28 @@ mod tests {
 
     #[test]
     fn stillness_counts_only_run_time_without_movement() {
+        // Creeping at 0.3 yd/s is still, at any frame rate: 120 frames a second for 2 s...
+        let mut fast = Stillness::default();
+        for i in 0..=240 {
+            let t = i as f32 / 120.0;
+            fast.step(Vec3::new(0.3 * t, 0.0, 0.0), t);
+        }
+        // ...or 20 frames a second.
+        let mut slow = Stillness::default();
+        for i in 0..=40 {
+            let t = i as f32 / 20.0;
+            slow.step(Vec3::new(0.3 * t, 0.0, 0.0), t);
+        }
+        assert!((fast.longest - 2.0).abs() < 1e-3, "{}", fast.longest);
+        assert!((slow.longest - 2.0).abs() < 1e-3, "{}", slow.longest);
+        // Walking at 1 yd/s is moving, at either rate.
+        let mut walk = Stillness::default();
+        for i in 0..=240 {
+            let t = i as f32 / 120.0;
+            walk.step(Vec3::new(t, 0.0, 0.0), t);
+        }
+        assert!(walk.longest < 1e-3, "{}", walk.longest);
+
         let mut s = Stillness::default();
         let here = Vec3::new(1.0, 0.0, 1.0);
         s.step(here, 0.0);
@@ -869,6 +950,55 @@ mod tests {
         assert!(swings_to_cast(look_code(SecretRace::Skeleton)));
         assert!(!swings_to_cast(look_code(SecretRace::Ogre)));
         assert!(!swings_to_cast(1));
+    }
+
+    #[test]
+    fn only_true_spell_casts_swing() {
+        // A Frostbolt (116) on a swinger swings; on a caster it does not.
+        assert_eq!(swing_for_cast(true, 116), Some(ATTACK_1H));
+        assert_eq!(swing_for_cast(false, 116), None);
+        // A Murloc, Gnoll or Centaur Hunter keeps its bow on every shot.
+        for spell in RANGED_SPELLS {
+            assert_eq!(swing_for_cast(true, spell), None, "spell {spell}");
+        }
+        for key in ["arcane_shot", "multi_shot", "aimed_shot", "concussive_shot"] {
+            let spell = crate::survivors::data::ability(key).spell;
+            assert_eq!(swing_for_cast(true, spell), None, "{key}");
+        }
+        // The win's flourish is not a cast to swing.
+        assert_eq!(swing_for_cast(true, VICTORY_FLOURISH), None);
+    }
+
+    #[test]
+    fn secret_races_are_neither_alliance_nor_horde_on_the_minimap() {
+        use crate::survivors::minimap::faction_groups;
+        for r in SecretRace::ALL {
+            assert_eq!(faction_groups(look_code(r)), (0, 0), "{r:?}");
+        }
+        assert_eq!(faction_groups(1), (2, 4));
+        assert_eq!(faction_groups(2), (4, 2));
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_is_kept_aside() {
+        let dir = std::env::temp_dir().join(format!("secrets-bak-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.toml");
+        std::fs::write(&path, "unlocked = [\"murloc\"\nchests = ").unwrap();
+        std::fs::write(dir.join("secrets.toml.bak"), "older").unwrap();
+        assert_eq!(load_from(&path), Progress::default());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("secrets.toml.bak")).unwrap(),
+            "unlocked = [\"murloc\"\nchests = "
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("secrets.toml.bak.1")).unwrap(), "older");
+        // A good file loads as it is, and a missing one is fresh.
+        std::fs::write(&path, "unlocked = [\"murloc\"]\nchests = 3\n").unwrap();
+        let p = load_from(&path);
+        assert_eq!((p.unlocked.len(), p.chests), (1, 3));
+        assert_eq!(load_from(&dir.join("none.toml")), Progress::default());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
