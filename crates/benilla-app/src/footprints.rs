@@ -49,6 +49,11 @@ const SHARED_CAP: usize = 512;
 /// bone without painting a terrace below.
 const SLAB_HALF_HEIGHT: f32 = 1.0;
 
+/// Carry (survivors): a unit carrying this (on its root) leaves no footprints. A game puts it on
+/// crowds it cannot afford to print; the client never adds it, so every unit prints as before.
+#[derive(Component)]
+pub(crate) struct NoFootprints;
+
 /// One live print; `verts` carry alpha 1.0 and the fade multiplies in at push time.
 struct Print {
     verts: Vec<EffectVertex>,
@@ -115,6 +120,7 @@ fn load_ink(
 
 /// The root unit's reads (the rider, for a mount).
 type RootState = (
+    Has<NoFootprints>,
     Has<Embodied>,
     Option<&'static NetEntity>,
     Option<&'static ObjectStore>,
@@ -165,10 +171,13 @@ fn spawn_footprints(
         while let Ok(child_of) = parents.get(root) {
             root = child_of.parent();
         }
-        let (is_self, root_net, store, movement) = match roots.get(root) {
+        let (no_prints, is_self, root_net, store, movement) = match roots.get(root) {
             Ok(r) => r,
             Err(_) => continue,
         };
+        if no_prints {
+            continue;
+        }
         if movement.is_some_and(|m| m.flags & move_flags::HOVER != 0) {
             continue;
         }

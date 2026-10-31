@@ -50,6 +50,30 @@ const BOX_CLAMP: f32 = 5.0;
 /// The reference's degenerate-box epsilon (`[0x8029d4]`).
 const DEGENERATE_EPS: f32 = 2.384e-7;
 
+/// Carry (survivors): a unit carrying this casts no blob shadow. A game puts it on crowds it
+/// cannot afford to shadow; the client never adds it, so its units all cast as before.
+#[derive(Component)]
+pub(crate) struct NoUnitShadow;
+
+/// Carry (survivors): how far (yd) a shadowed unit may walk, and turn (radians), before its
+/// shadow is re-projected; in between, the last projection slides with the feet. The default
+/// re-projects at the millimetre and ~0.05 deg the client always has, so a client that never
+/// inserts it is unchanged.
+#[derive(Resource, Clone, Copy)]
+pub(crate) struct ShadowReproject {
+    pub(crate) distance: f32,
+    pub(crate) turn: f32,
+}
+
+impl Default for ShadowReproject {
+    fn default() -> Self {
+        Self {
+            distance: 1e-3,
+            turn: 1e-3,
+        }
+    }
+}
+
 /// One unit's shadow record, a top-level entity despawned with its owner.
 #[derive(Component)]
 struct BlobShadow {
@@ -58,7 +82,7 @@ struct BlobShadow {
 
 /// Last frame's rebuild inputs. `surfaces` counts the decal receivers, so a tile streaming in
 /// under a standing unit still re-arms the rebuild.
-#[derive(Component, Default)]
+#[derive(Component, Default, Clone, Copy)]
 struct ShadowKey {
     feet: Vec3,
     rotation: Quat,
@@ -67,6 +91,8 @@ struct ShadowKey {
     alpha: f32,
     surfaces: usize,
     shown: bool,
+    /// Where the cached triangles were projected; `feet` is where they were last slid to.
+    projected_at: Vec3,
 }
 
 /// The cached world-space triangles; empty when hidden.
@@ -115,6 +141,7 @@ fn sync_shadows(
         (
             With<ModelAnimations>,
             Without<crate::entities::mount::MountBody>,
+            Without<NoUnitShadow>,
         ),
     >,
     shadows: Query<(Entity, &BlobShadow)>,
@@ -124,11 +151,16 @@ fn sync_shadows(
     mut shrank: RemovedComponents<ModelAnimations>,
     mounted: Query<(), Added<crate::entities::mount::MountBody>>,
     mut unmounted: RemovedComponents<crate::entities::mount::MountBody>,
+    // Carry (survivors): the opt-out arriving or leaving re-runs the census too.
+    opted_out: Query<(), Added<NoUnitShadow>>,
+    mut opted_in: RemovedComponents<NoUnitShadow>,
 ) {
     if grew.is_empty()
         && mounted.is_empty()
+        && opted_out.is_empty()
         && shrank.read().next().is_none()
         && unmounted.read().next().is_none()
+        && opted_in.read().next().is_none()
     {
         return;
     }
@@ -180,7 +212,9 @@ fn update_shadows(
     // A once-a-second census of shadows and why the hidden ones hid, at
     // `RUST_LOG=benilla_app::blob_shadow=debug` (a `benilla::` filter matches nothing).
     mut census_at: Local<f32>,
+    reproject: Option<Res<ShadowReproject>>,
 ) {
+    let reproject = reproject.as_deref().copied().unwrap_or_default();
     let now = time.elapsed_secs();
     let census = now >= *census_at;
     if census {
@@ -250,8 +284,19 @@ fn update_shadows(
             alpha,
             surfaces: surface_count,
             shown: true,
+            projected_at: unit.translation,
         };
         if key.shown && !key_changed(&key, &next) {
+            n_shown += 1;
+            continue;
+        }
+        // Carry (survivors): a short walk slides the last projection instead of re-projecting.
+        if key.shown && slides(&key, &next, reproject) {
+            let delta = next.feet - key.feet;
+            for v in &mut verts.0 {
+                v.pos = (Vec3::from(v.pos) + delta).into();
+            }
+            key.feet = next.feet;
             n_shown += 1;
             continue;
         }
@@ -450,6 +495,20 @@ fn key_changed(a: &ShadowKey, b: &ShadowKey) -> bool {
         || a.surfaces != b.surfaces
 }
 
+/// Carry (survivors): whether `b` differs from `a` only by a walk of the feet within `tol.distance`
+/// of where the shadow was last projected and a turn within `tol.turn` of the projected facing,
+/// so the cached triangles may slide along instead.
+fn slides(a: &ShadowKey, b: &ShadowKey, tol: ShadowReproject) -> bool {
+    let walked_only = ShadowKey {
+        feet: a.feet,
+        rotation: a.rotation,
+        ..*b
+    };
+    !key_changed(a, &walked_only)
+        && a.projected_at.distance_squared(b.feet) <= tol.distance * tol.distance
+        && a.rotation.angle_between(b.rotation) <= tol.turn
+}
+
 /// The reference's trapezoid alpha ramp (`0x6d81a0`/`0x6d82d0`): over `x = 12u`, `x/2` below 2,
 /// 1 through 10, `(12-x)/2` after.
 fn shadow_ramp(u: f32) -> f32 {
@@ -480,6 +539,40 @@ mod tests {
         // Out-of-range clamps, never negative.
         assert_eq!(shadow_ramp(-1.0), 0.0);
         assert_eq!(shadow_ramp(2.0), 0.0);
+    }
+
+    /// The client's default never slides: past its millimetre a walk re-projects. A survivors
+    /// tolerance slides a short walk or a small turn, and re-projects past either.
+    #[test]
+    fn a_short_walk_slides_only_under_a_wider_tolerance() {
+        let at = Vec3::new(5.0, 1.0, -3.0);
+        let projected = ShadowKey {
+            feet: at,
+            alpha: 1.0,
+            shown: true,
+            projected_at: at,
+            ..Default::default()
+        };
+        let walked = |d: Vec3, yaw: f32| ShadowKey {
+            feet: at + d,
+            rotation: Quat::from_rotation_y(yaw),
+            projected_at: at + d,
+            ..projected
+        };
+        let wide = ShadowReproject {
+            distance: 0.25,
+            turn: 0.1,
+        };
+        let step = walked(Vec3::X * 0.1, 0.0);
+        assert!(key_changed(&projected, &step));
+        assert!(!slides(&projected, &step, ShadowReproject::default()));
+        assert!(slides(&projected, &step, wide));
+        assert!(!slides(&projected, &walked(Vec3::X * 0.3, 0.0), wide));
+        assert!(slides(&projected, &walked(Vec3::ZERO, 0.05), wide));
+        assert!(!slides(&projected, &walked(Vec3::ZERO, 0.2), wide));
+        // Any other input moving re-projects, however short the walk.
+        let faded = ShadowKey { alpha: 0.5, ..step };
+        assert!(!slides(&projected, &faded, wide));
     }
 
     /// The ±5 clamp is a pre-scale cap, not a floor.

@@ -10,6 +10,7 @@ mod cards;
 mod characters;
 mod combatlog;
 mod data;
+mod detail;
 mod enemies;
 mod feedback;
 mod fill;
@@ -68,6 +69,7 @@ impl Plugin for SurvivorsPlugin {
                 talents::plugin,
                 upscale::plugin,
                 feedback::plugin,
+                detail::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
