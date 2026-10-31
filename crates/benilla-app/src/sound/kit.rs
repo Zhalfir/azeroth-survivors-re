@@ -123,6 +123,8 @@ pub(crate) struct ActiveChannel {
     amp: f32,
     /// Which per-unit latch this channel's liveness represents ([`Latch`]).
     latch: Latch,
+    /// When it started, for the ceiling census's age column.
+    born: bevy::platform::time::Instant,
 }
 
 /// Which per-unit latch a channel holds. The reference keeps separate handles on a unit,
@@ -274,7 +276,7 @@ pub(crate) const SOFTWARE_CHANNELS: usize = 12;
 /// (`fmod.dll 0x1002be47`) and FMOD's steal scan skips `>= 256` (`0x100268e9`), so its 13th sound
 /// is dropped. FMOD's own allocator rule (`0x100268e6`) runs here instead, because dropping the
 /// newest sound silences a near one in favour of distant ones.
-fn claim_voice(out: &mut SoundOutput, candidate_amp: f32) -> bool {
+fn claim_voice(out: &mut SoundOutput, kit: u32, candidate_amp: f32) -> bool {
     if out.live_voices() >= SOFTWARE_CHANNELS {
         // Reap first: a channel that ended earlier this frame would still count against the
         // ceiling until the pump runs.
@@ -298,6 +300,9 @@ fn claim_voice(out: &mut SoundOutput, candidate_amp: f32) -> bool {
         }
         VoiceSlot::Denied => {
             out.voices_denied += 1;
+            let tally = out.denied_by_kit.entry(kit).or_insert((0, 0.0));
+            tally.0 += 1;
+            tally.1 = tally.1.max(candidate_amp);
             false
         }
     }
@@ -316,6 +321,28 @@ pub(super) fn unstealable_census(out: &SoundOutput, kits: Option<&SoundKits>) ->
                 .map_or("?", |k| k.name.as_str());
             let what = if c.looping { "loop" } else { "latch" };
             format!("{} ({name}) {what} on {:?}", c.kit, c.source)
+        })
+        .collect()
+}
+
+/// Every live kit channel as `kit (name) amp age`, quietest first, with `L` for a loop and `*` for
+/// one the cap may not steal: the steal compares a newcomer against the first of these.
+pub(super) fn held_census(out: &SoundOutput, kits: Option<&SoundKits>) -> Vec<String> {
+    let mut held: Vec<&ActiveChannel> = out.channels.iter().collect();
+    held.sort_by(|a, b| a.amp.total_cmp(&b.amp));
+    held.into_iter()
+        .map(|c| {
+            let name = kits
+                .and_then(|k| k.catalog.get(c.kit))
+                .map_or("?", |k| k.name.as_str());
+            format!(
+                "{} ({name}) {:.4} {}ms{}{}",
+                c.kit,
+                c.amp,
+                c.born.elapsed().as_millis(),
+                if c.looping { " L" } else { "" },
+                if stealable(c.looping, c.latch) { "" } else { " *" },
+            )
         })
         .collect()
 }
@@ -557,7 +584,7 @@ pub(super) fn play_kit_ext(
 
     // The global ceiling goes last: it alone can stop another sound, and must not for a play a
     // cheaper gate drops.
-    if !claim_voice(out, amp) {
+    if !claim_voice(out, id, amp) {
         return Ok(false);
     }
 
@@ -608,6 +635,7 @@ pub(super) fn play_kit_ext(
         amp,
         bus,
         latch,
+        born: bevy::platform::time::Instant::now(),
     });
     Ok(true)
 }
@@ -771,7 +799,7 @@ pub(crate) fn play_file(
     };
     let amp = config.category_amp(category);
     let data = data.volume(mixer::amp_to_db(amp));
-    if !claim_voice(out, amp) {
+    if !claim_voice(out, 0, amp) {
         return Ok(());
     }
     // No device is a no-op, as in [`play_kit_ext`].
@@ -798,6 +826,7 @@ pub(crate) fn play_file(
         amp,
         bus: Bus::DEFAULT,
         latch: Latch::None,
+        born: bevy::platform::time::Instant::now(),
     });
     Ok(())
 }

@@ -251,6 +251,8 @@ pub(crate) struct SoundOutput {
     pub(crate) voices_denied: u64,
     /// Same-kit copies dropped by [`kit::SAME_KIT_MAX`].
     pub(crate) copies_dropped: u64,
+    /// Ceiling refusals this report window by kit: count and loudest refused amplitude.
+    pub(crate) denied_by_kit: std::collections::HashMap<u32, (u32, f32)>,
 }
 
 impl SoundOutput {
@@ -392,6 +394,7 @@ impl Plugin for SoundPlugin {
             voices_stolen: 0,
             voices_denied: 0,
             copies_dropped: 0,
+            denied_by_kit: Default::default(),
         })
         .init_resource::<SoundConfig>()
         .init_resource::<AudioListener>()
@@ -579,7 +582,26 @@ fn poll_mix_health(
             held.len(),
             held.join(", "),
         );
+        let mut refused: Vec<(u32, (u32, f32))> = out.denied_by_kit.drain().collect();
+        refused.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+        let refused: Vec<String> = refused
+            .iter()
+            .take(8)
+            .map(|(id, (n, amp))| {
+                let name = kits
+                    .as_deref()
+                    .and_then(|k| kit::kit_name(k, *id))
+                    .unwrap_or("?");
+                format!("{id} ({name}) x{n} max {amp:.4}")
+            })
+            .collect();
+        warn!(
+            "audio: ceiling detail — refused [{}]; held, quietest first [{}]",
+            refused.join(", "),
+            kit::held_census(&out, kits.as_deref()).join(", "),
+        );
     }
+    out.denied_by_kit.clear();
 }
 
 /// One report window's output side: every layer between the mix and the speaker, each with its
