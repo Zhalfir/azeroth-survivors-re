@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy::ui_render::ui_material::MaterialNode;
 
 use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot, SAFE_BOTTOM, TEXT_FLOOR};
+use super::secrets::{self, Progress, SecretFace, SecretRace};
 use super::{data, Phase, Rng, Run, Selection};
 use crate::char_select::race_name;
 use crate::glue::art::{class_tc, race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
@@ -86,6 +87,13 @@ pub(super) struct PickName;
 #[derive(Component)]
 pub(super) struct TowerRoot;
 
+/// The unlocked secret races' box beside the tower, hidden while none is unlocked.
+#[derive(Component)]
+pub(super) struct SecretsPanel;
+
+/// The secrets box's inner width: two race buttons and their gap.
+const SECRETS_W: f32 = 2.0 * 48.0 + 6.0;
+
 /// Enter World's holder: shown on character select, hidden while creating.
 #[derive(Component)]
 pub(super) struct EnterSlot;
@@ -111,6 +119,7 @@ fn save_pick(sel: &Selection) {
 /// leaves the default.
 pub(super) fn restore_pick(
     creatures: Option<Res<crate::entities::Creatures>>,
+    progress: Res<Progress>,
     mut selection: ResMut<Selection>,
     mut done: Local<bool>,
 ) {
@@ -137,19 +146,32 @@ pub(super) fn restore_pick(
         selection.version += 1;
     }
     if class < data::CLASSES.len() {
-        let all = all_looks(creatures);
+        let all = all_looks(creatures, &progress.unlocked);
         if let Some(l) = find(&all[class], Some(race as u8), Some(sex as u8)) {
             set(&mut selection, &all, class, l);
         }
     }
 }
 
-/// Every class's looks, `(display, race, sex)`, indexed like [`data::CLASSES`].
-pub(super) fn all_looks(creatures: &crate::entities::Creatures) -> Vec<Vec<(u32, u8, u8)>> {
+/// Every class's looks, `(display, race, sex)`, indexed like [`data::CLASSES`], with the
+/// `unlocked` secret races' (`secrets::secret_looks`).
+pub(super) fn all_looks(
+    creatures: &crate::entities::Creatures,
+    unlocked: &[String],
+) -> Vec<Vec<(u32, u8, u8)>> {
     data::CLASSES
         .iter()
-        .map(|c| looks_for(c, creatures))
+        .map(|c| looks_for(c, creatures, unlocked))
         .collect()
+}
+
+/// The next look of the same race and sex after `i`, wrapping: a secret race's skins.
+pub(super) fn next_skin(looks: &[(u32, u8, u8)], i: usize) -> Option<usize> {
+    let &(_, r, s) = looks.get(i)?;
+    let n = looks.len();
+    (1..=n)
+        .map(|k| (i + k) % n)
+        .find(|&j| looks[j].1 == r && looks[j].2 == s)
 }
 
 pub(super) fn find(looks: &[(u32, u8, u8)], race: Option<u8>, sex: Option<u8>) -> Option<usize> {
@@ -470,6 +492,70 @@ fn tower(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
                     1.0,
                 );
             });
+
+        // The unlocked secret races, after the eight, in their own gold-edged box beside the
+        // tower; a locked one never shows here (the Secrets page hints at it). A second tap on
+        // the picked one cycles its skins.
+        tower
+            .spawn((
+                SecretsPanel,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(216.0),
+                    top: px(60.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::all(px(8.0)),
+                    row_gap: px(6.0),
+                    border: UiRect::all(px(2.0)),
+                    border_radius: BorderRadius::all(px(6.0)),
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(FRAME_FILL),
+                BorderColor::all(GOLD),
+            ))
+            .with_children(|panel| {
+                outlined_text(
+                    panel,
+                    Node::default(),
+                    (),
+                    (),
+                    GlueText {
+                        text: "Secrets",
+                        size: 18.0,
+                        color: GOLD,
+                        wrap: false,
+                    },
+                    f,
+                    1.0,
+                );
+                panel
+                    .spawn(Node {
+                        width: px(SECRETS_W),
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: px(6.0),
+                        row_gap: px(6.0),
+                        ..default()
+                    })
+                    .with_children(|grid| {
+                        for r in SecretRace::ALL {
+                            let d = secrets::def(r);
+                            icon_button(
+                                grid,
+                                f,
+                                MenuAction::Race(secrets::look_code(r)),
+                                Some(SecretFace(d.icon)),
+                                None,
+                                None::<()>,
+                                d.name,
+                                art,
+                                1.0,
+                            );
+                        }
+                    });
+            });
     });
 }
 
@@ -662,6 +748,7 @@ pub(super) fn menu_clicks(
     mut rng: ResMut<Rng>,
     mut next: ResMut<NextState<Phase>>,
     unlocks: Res<super::characters::Unlocks>,
+    progress: Res<Progress>,
 ) {
     if *phase.get() != Phase::Menu {
         return;
@@ -676,7 +763,7 @@ pub(super) fn menu_clicks(
     else {
         return;
     };
-    let all = all_looks(creatures);
+    let all = all_looks(creatures, &progress.unlocked);
     let cur = selection
         .look
         .and_then(|i| selection.looks.get(i))
@@ -732,6 +819,14 @@ pub(super) fn menu_clicks(
                 set(&mut selection, &all, c, l);
             }
         }
+        // The picked race again: its next skin (a secret race's display variants).
+        MenuAction::Race(r) if race == Some(r) => {
+            if let (Some(c), Some(i)) = (selection.class, selection.look) {
+                if let Some(l) = next_skin(&all[c], i).filter(|&l| l != i) {
+                    set(&mut selection, &all, c, l);
+                }
+            }
+        }
         // The race keeps the class where it can, else takes the first class it has.
         MenuAction::Race(r) => {
             let classes = selection.class.into_iter().chain(0..all.len());
@@ -773,17 +868,38 @@ pub(super) fn refresh_menu_ui(
     mut labels: Query<&mut Visibility, (With<HoverLabel>, Without<MenuAction>)>,
     mut faces: Query<(&RaceFace, &mut ImageNode)>,
     mut name: Query<(&mut Text, &mut TextColor), With<PickName>>,
-    mut cache: Local<(Option<u32>, bool, Vec<Vec<(u32, u8, u8)>>)>,
+    mut panels: Query<&mut Node, (With<SecretsPanel>, Without<MenuAction>)>,
+    progress: Res<Progress>,
+    mut cache: Local<(Option<u32>, bool, usize, Vec<Vec<(u32, u8, u8)>>)>,
 ) {
     let have = creatures.is_some();
-    if cache.0 != Some(selection.version) || cache.1 != have {
+    let unlocked = progress.unlocked.len();
+    if cache.0 != Some(selection.version) || cache.1 != have || cache.2 != unlocked {
         *cache = (
             Some(selection.version),
             have,
-            creatures.as_deref().map(all_looks).unwrap_or_default(),
+            unlocked,
+            creatures
+                .as_deref()
+                .map(|c| all_looks(c, &progress.unlocked))
+                .unwrap_or_default(),
         );
     }
-    let all = &cache.2;
+    let all = &cache.3;
+    let any_secret = all
+        .iter()
+        .flatten()
+        .any(|&(_, r, _)| secrets::from_look_code(r).is_some());
+    for mut node in &mut panels {
+        let want = if any_secret {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != want {
+            node.display = want;
+        }
+    }
     let cur = selection
         .look
         .and_then(|i| selection.looks.get(i))
@@ -817,6 +933,25 @@ pub(super) fn refresh_menu_ui(
                 let display = if ok { Display::Flex } else { Display::None };
                 if node.display != display {
                     node.display = display;
+                }
+            }
+            // A secret race shows only once unlocked, and leaves no gap in its box.
+            MenuAction::Race(r) if secrets::from_look_code(r).is_some() => {
+                let ok = all.iter().any(|l| find(l, Some(r), None).is_some());
+                let display = if ok { Display::Flex } else { Display::None };
+                if node.display != display {
+                    node.display = display;
+                }
+            }
+            // A creature secret has one body: no gender to pick.
+            MenuAction::Sex(_) => {
+                let want = if cur.is_some_and(|(r, _)| secrets::one_body(r)) {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                };
+                if *vis != want {
+                    *vis = want;
                 }
             }
             MenuAction::Race(r) => {
@@ -861,7 +996,7 @@ pub(super) fn refresh_menu_ui(
     let class = selection.class_def();
     if let Ok((mut t, mut color)) = name.single_mut() {
         let want = match (class, cur) {
-            (Some(c), Some((r, _))) => format!("{} {}", race_name(r), c.name),
+            (Some(c), Some((r, _))) => format!("{} {}", secrets::race_label(r), c.name),
             _ => String::new(),
         };
         if t.0 != want {

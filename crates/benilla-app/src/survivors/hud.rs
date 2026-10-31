@@ -1001,6 +1001,7 @@ pub(super) fn menu_preview(
         display,
         race,
         sex,
+        super::secrets::look_scale(race),
         serial,
         pos,
     );
@@ -1032,7 +1033,7 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
     run.version += 1;
     super::combatlog::begin(
         class.name,
-        crate::char_select::race_name(race),
+        super::secrets::race_label(race),
         selection.map_def().name,
         selection.difficulty.name(),
         selection.character,
@@ -1042,7 +1043,7 @@ pub(super) fn start_run(run: &mut Run, selection: &mut Selection) -> bool {
         0.0,
         format!(
             "run start: {} {} in {} on {} ({} s to the final boss), character {:?}",
-            crate::char_select::race_name(race),
+            super::secrets::race_label(race),
             class.name,
             selection.map_def().name,
             selection.difficulty.name(),
@@ -1180,9 +1181,12 @@ pub(super) fn pick(
     }
 }
 
+/// The class's looks: one per race and sex its trainers come in, then one per display variant
+/// of each unlocked secret race that may be the class (`secrets::secret_looks`).
 pub(super) fn looks_for(
     class: &data::ClassDef,
     creatures: &crate::entities::Creatures,
+    unlocked: &[String],
 ) -> Vec<(u32, u8, u8)> {
     let mut out: Vec<(u32, u8, u8)> = Vec::new();
     for &d in class.looks {
@@ -1193,6 +1197,7 @@ pub(super) fn looks_for(
         }
     }
     out.sort_by_key(|&(_, r, s)| (r, s));
+    out.extend(super::secrets::secret_looks(class.id, unlocked));
     out
 }
 
@@ -1285,7 +1290,8 @@ pub(super) fn refresh_menu(
 ) {
     if let (Some(class), Some(creatures)) = (selection.class_def(), creatures.as_deref()) {
         if selection.looks.is_empty() {
-            let looks = looks_for(class, creatures);
+            // The auto-player's pick: the trainers' looks only.
+            let looks = looks_for(class, creatures, &[]);
             if !looks.is_empty() {
                 selection.looks = looks;
                 selection.look = Some(0);
@@ -1486,7 +1492,7 @@ pub(super) fn refresh_hud(
     }
     let summary = format!(
         "{} {} in {}   —   {AGAIN_HINT}",
-        crate::char_select::race_name(run.race),
+        super::secrets::race_label(run.race),
         run.class.name,
         selection.map_def().name,
     );

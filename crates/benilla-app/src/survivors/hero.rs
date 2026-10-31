@@ -145,17 +145,20 @@ pub(super) fn follow_map(
     }
 }
 
-/// The hero in the class trainer's look, weapons drawn.
+/// The hero in the picked look, weapons drawn. `race` is the look's race slot: a secret race's
+/// code turns into its unit race here (`secrets::unit_race`), and `scale` is the whole render
+/// scale (1 for the eight races, the secret race's own otherwise).
 pub(super) fn spawn_hero(
     commands: &mut Commands,
     class: &'static ClassDef,
     display: u32,
     race: u8,
     sex: u8,
+    scale: f32,
     serial: u64,
     pos: Vec3,
 ) -> Entity {
-    let bytes0 = u32::from(race)
+    let bytes0 = u32::from(super::secrets::unit_race(race))
         | u32::from(class.id) << 8
         | u32::from(sex) << 16
         | u32::from(class.power) << 24;
@@ -164,7 +167,7 @@ pub(super) fn spawn_hero(
         &UnitSpec {
             serial,
             display,
-            scale: 1.0,
+            scale,
             level: 60,
             faction: units::FACTION_FRIENDLY,
             bytes0,
@@ -177,6 +180,9 @@ pub(super) fn spawn_hero(
     commands
         .entity(e)
         .insert((Hero { vy: 0.0, air: 0.0 }, Marks::buffs()));
+    if super::secrets::swings_to_cast(race) {
+        commands.entity(e).insert(units::CastsWithSwing);
+    }
     e
 }
 

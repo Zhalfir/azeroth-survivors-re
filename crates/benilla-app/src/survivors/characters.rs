@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use super::data::{self, Difficulty};
 use super::hud::{HudFont, TEXT_FLOOR};
 use super::menu::{self, EnterSlot, MenuAction, TowerRoot};
+use super::secrets::{self, SecretRace};
 use super::{Phase, Rng, Run, Selection};
-use crate::char_select::race_name;
 
 pub(super) const MAX_CHARACTERS: usize = 8;
 /// 16 zones and 3 raids (not yet built) × the difficulties they count on: one point each.
@@ -58,8 +58,16 @@ pub(super) struct Character {
     pub name: String,
     /// `ChrClasses.dbc` id ([`data::ClassDef::id`]): stable where the class list's order is not.
     pub class_id: u8,
+    /// A look's race slot: a `ChrRaces` id, or a secret race's look code (`secrets::look_code`),
+    /// which [`Self::secret`] overrides on load.
     pub race: u8,
     pub sex: u8,
+    /// The secret race played, by key (`secrets::data::SecretDef::key`); `None` for the eight.
+    #[serde(default)]
+    pub secret: Option<String>,
+    /// Which of the race's display variants, among its looks of this sex.
+    #[serde(default)]
+    pub skin: u8,
     /// Maps completed, as `(map name, difficulty name)`.
     #[serde(default)]
     pub completions: Vec<(String, String)>,
@@ -83,6 +91,35 @@ impl Character {
     fn class_index(&self) -> Option<usize> {
         data::CLASSES.iter().position(|c| c.id == self.class_id)
     }
+
+    /// The race as the list names it.
+    pub(super) fn race_label(&self) -> &'static str {
+        match &self.secret {
+            Some(k) => SecretRace::from_key(k).map_or("Unknown", |r| secrets::def(r).name),
+            None => secrets::race_label(self.race),
+        }
+    }
+}
+
+/// The look a saved character wears among its class's `looks`: its secret race by key (a code
+/// may have moved since), else its race; the `skin`-th of that race and sex. An unknown secret,
+/// or a look that is gone, falls back to the class's first look.
+pub(super) fn look_of(c: &Character, looks: &[(u32, u8, u8)]) -> Option<usize> {
+    let race = match &c.secret {
+        Some(k) => match SecretRace::from_key(k) {
+            Some(r) => secrets::look_code(r),
+            None => return menu::find(looks, None, None),
+        },
+        None => c.race,
+    };
+    let same: Vec<usize> = (0..looks.len())
+        .filter(|&i| looks[i].1 == race && looks[i].2 == c.sex)
+        .collect();
+    same.get(usize::from(c.skin))
+        .or(same.first())
+        .copied()
+        .or_else(|| menu::find(looks, Some(race), None))
+        .or_else(|| menu::find(looks, None, None))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -643,12 +680,20 @@ fn press(
                 if chars.new_name.is_empty() {
                     chars.new_name = random_name(&mut rng, &chars.list);
                 }
+                let looks = &selection.looks;
+                let skin = selection.look.map_or(0, |i| {
+                    (0..i)
+                        .filter(|&j| looks[j].1 == race && looks[j].2 == sex)
+                        .count()
+                });
                 let c = Character {
                     id,
                     name: chars.new_name.clone(),
                     class_id: class.id,
                     race,
                     sex,
+                    secret: secrets::from_look_code(race).map(|r| secrets::def(r).key.to_string()),
+                    skin: u8::try_from(skin).unwrap_or(0),
                     completions: Vec::new(),
                     talents: Default::default(),
                 };
@@ -673,6 +718,7 @@ fn apply_active(
     chars: Res<Characters>,
     mut selection: ResMut<Selection>,
     creatures: Option<Res<crate::entities::Creatures>>,
+    progress: Res<secrets::Progress>,
 ) {
     let Some(creatures) = creatures.as_deref() else {
         return;
@@ -688,10 +734,13 @@ fn apply_active(
         return;
     }
     let Some(class) = c.class_index() else { return };
-    let all = menu::all_looks(creatures);
-    if let Some(look) = menu::find(&all[class], Some(c.race), Some(c.sex))
-        .or_else(|| menu::find(&all[class], Some(c.race), None))
-    {
+    // The character's own secret race is its own, even if the account's progress was lost.
+    let mut unlocked = progress.unlocked.clone();
+    if let Some(k) = c.secret.as_ref().filter(|k| !unlocked.contains(k)) {
+        unlocked.push(k.clone());
+    }
+    let all = menu::all_looks(creatures, &unlocked);
+    if let Some(look) = look_of(c, &all[class]) {
         menu::set(&mut selection, &all, class, look);
         selection.character = Some(c.id);
     }
@@ -758,7 +807,7 @@ fn rebuild_rows(
                 });
                 row.spawn(text(
                     f,
-                    format!("{} {}", race_name(c.race), class_name),
+                    format!("{} {}", c.race_label(), class_name),
                     14.0,
                     class_color,
                 ));
@@ -1078,6 +1127,8 @@ mod tests {
             class_id: 1,
             race: 1,
             sex: 0,
+            secret: None,
+            skin: 0,
             completions: completions
                 .iter()
                 .map(|&(m, d)| (data::MAPS[m].name.to_string(), d.name().to_string()))

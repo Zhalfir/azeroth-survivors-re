@@ -8,7 +8,9 @@ use bevy::prelude::*;
 use super::data::Weapon;
 use super::RunEntity;
 use crate::combat_text::CombatTextSpawn;
-use crate::creature_anim::{CastEvent, CastEventKind, PlaySeq, SpellGoTargets, SwingMessage};
+use crate::creature_anim::{
+    CastEvent, CastEventKind, EmoteAnim, PlaySeq, SpellGoTargets, SwingMessage,
+};
 use crate::net::{FieldChanged, Guid, NetEntity, ObjectStore};
 
 const FIELD_HEALTH: u16 = 22;
@@ -301,20 +303,27 @@ impl Marks {
     }
 }
 
+/// On a hero whose model has no spell-cast animations (a secret race, `secrets::cast_fallback`):
+/// its casts swing the weapon.
+#[derive(Component)]
+pub(super) struct CastsWithSwing;
+
 /// The messages that make a local cast look like a server's.
 #[derive(SystemParam)]
-pub(super) struct Fx<'w> {
+pub(super) struct Fx<'w, 's> {
     seq: ResMut<'w, PlaySeq>,
     casts: MessageWriter<'w, CastEvent>,
     gos: MessageWriter<'w, SpellGoTargets>,
     swings: MessageWriter<'w, SwingMessage>,
     text: MessageWriter<'w, CombatTextSpawn>,
+    oneshots: MessageWriter<'w, EmoteAnim>,
+    swingers: Query<'w, 's, (), With<CastsWithSwing>>,
 }
 
 /// More impacts than this per cast only cost frames.
 const MAX_VISUAL_HITS: usize = 12;
 
-impl Fx<'_> {
+impl Fx<'_, '_> {
     /// `SMSG_SPELL_GO`: the cast kit on the caster, and a missile or an impact at each hit.
     pub fn cast(&mut self, caster: Entity, spell: u32, hits: &[Entity], dest: Option<Vec3>) {
         let seq = self.seq.next();
@@ -333,6 +342,18 @@ impl Fx<'_> {
             ammo_display_id: None,
             seq,
         });
+        // After the kit (a later stamp), so the swing is what plays.
+        if self.swingers.contains(caster) {
+            if let Some(anim_id) = super::secrets::cast_fallback(false) {
+                let seq = self.seq.next();
+                self.oneshots.write(EmoteAnim {
+                    entity: caster,
+                    anim_id,
+                    seq,
+                    via_player: false,
+                });
+            }
+        }
     }
 
     /// Only the spell's impact kit, on `target`: no cast animation on anyone.

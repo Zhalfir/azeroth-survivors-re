@@ -59,14 +59,13 @@ impl SecretRace {
 
     /// The race whose [`SecretDef::key`] is `key`; `None` for a key the data no longer has (a
     /// saved character then falls back to its class's first normal look).
-    #[allow(dead_code)] // Read by Create Character and the Secrets page (later tasks).
     pub(in crate::survivors) fn from_key(key: &str) -> Option<SecretRace> {
         Self::ALL.into_iter().find(|&r| def(r).key == key)
     }
 }
 
 /// One secret race's data.
-#[allow(dead_code)] // Read by Create Character and the Secrets page (later tasks).
+#[allow(dead_code)] // `riddle` and `condition` are read by the Secrets page (a later task).
 pub(in crate::survivors) struct SecretDef {
     /// Stable save key: `Progress::unlocked` and a character's look name it. Never rename.
     pub key: &'static str,
@@ -83,6 +82,8 @@ pub(in crate::survivors) struct SecretDef {
     pub riddle: &'static str,
     /// Shown only once unlocked.
     pub condition: &'static str,
+    /// Its button face in the race picker and the Secrets page, an `Interface\Icons` file.
+    pub icon: &'static str,
 }
 
 // `ChrClasses.dbc` ids.
@@ -118,6 +119,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "Time is money, friend — and you've spent it all, from the forest to the fallen king.",
         condition: "clear the whole Normal pass",
+        icon: "Interface\\Icons\\INV_Misc_Coin_02",
     },
     SecretDef {
         key: "skeleton",
@@ -129,6 +131,7 @@ static DEFS: [SecretDef; 13] = [
         casts: false,
         riddle: "The Light fails those who fall too often in its name.",
         condition: "die 100 times as a Paladin",
+        icon: "Interface\\Icons\\INV_Misc_Bone_ElfSkull_01",
     },
     SecretDef {
         key: "murloc",
@@ -141,6 +144,7 @@ static DEFS: [SecretDef; 13] = [
         casts: false,
         riddle: "Mrgllll… ten thousand brothers cry out from the shore.",
         condition: "kill 10,000 murlocs",
+        icon: "Interface\\Icons\\INV_Misc_Head_Murloc_01",
     },
     SecretDef {
         key: "gnoll",
@@ -152,6 +156,7 @@ static DEFS: [SecretDef; 13] = [
         casts: false,
         riddle: "The Riverpaw count their dead in thousands.",
         condition: "kill 5,000 gnolls",
+        icon: "Interface\\Icons\\INV_Misc_Head_Gnoll_01",
     },
     SecretDef {
         key: "kobold",
@@ -163,6 +168,7 @@ static DEFS: [SecretDef; 13] = [
         casts: false,
         riddle: "You no take candle… but you take everything else.",
         condition: "open 100 chests",
+        icon: "Interface\\Icons\\INV_Misc_Head_Kobold_01",
     },
     SecretDef {
         key: "ogre",
@@ -175,6 +181,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "Heroes are small. Make them smaller — with an axe.",
         condition: "win a Heroic run as a Warrior",
+        icon: "Interface\\Icons\\INV_Axe_10",
     },
     SecretDef {
         key: "satyr",
@@ -186,6 +193,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "Where the forest burns green, the corrupted wait for a hero.",
         condition: "clear Teldrassil and Mount Hyjal on Heroic",
+        icon: "Interface\\Icons\\INV_Misc_Horn_02",
     },
     SecretDef {
         key: "furbolg",
@@ -197,6 +205,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "The wild spirit walks unharmed through the storm.",
         condition: "win a Druid run never below 50 % health",
+        icon: "Interface\\Icons\\Ability_Hunter_Pet_Bear",
     },
     SecretDef {
         key: "dragonspawn",
@@ -208,6 +217,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "Only those who conquer the hardest trials earn the flight's respect.",
         condition: "clear Mythic",
+        icon: "Interface\\Icons\\INV_Misc_Head_Dragon_Black",
     },
     SecretDef {
         key: "quillboar",
@@ -219,6 +229,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "The thorns remember who walked the Razorfen.",
         condition: "clear The Barrens and Durotar",
+        icon: "Interface\\Icons\\INV_Misc_Head_Quillboar_01",
     },
     SecretDef {
         key: "felguard",
@@ -231,6 +242,7 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "Command the Legion at its hardest, and it will kneel.",
         condition: "win a Mythic run as a Warlock",
+        icon: "Interface\\Icons\\Spell_Shadow_Metamorphosis",
     },
     SecretDef {
         key: "centaur",
@@ -242,6 +254,7 @@ static DEFS: [SecretDef; 13] = [
         casts: false,
         riddle: "The Kolkar respect only those who never stop running.",
         condition: "win a run in The Barrens without ever standing still more than 3 seconds",
+        icon: "Interface\\Icons\\INV_Misc_Head_Centaur_01",
     },
     SecretDef {
         key: "imp",
@@ -253,11 +266,29 @@ static DEFS: [SecretDef; 13] = [
         casts: true,
         riddle: "Faster, master, faster! One minute is all the big one gets!",
         condition: "kill the final boss within 60 seconds of its arrival",
+        icon: "Interface\\Icons\\Spell_Shadow_SummonImp",
     },
 ];
 
 pub(in crate::survivors) fn def(r: SecretRace) -> &'static SecretDef {
     &DEFS[r as usize]
+}
+
+/// The Goblin's female displays; every other secret display is one body, sex 0.
+const GOBLIN_FEMALE: [u32; 2] = [16431, 7909];
+
+/// The sex a secret display is: only the Goblin's character NPCs come in two.
+pub(in crate::survivors) fn display_sex(display: u32) -> u8 {
+    u8::from(GOBLIN_FEMALE.contains(&display))
+}
+
+/// The race a secret look puts in `UNIT_FIELD_BYTES_0`: 9 for the Goblin's character model,
+/// 0 for a creature, whose display alone decides its body.
+pub(in crate::survivors) fn unit_race(r: SecretRace) -> u8 {
+    match r {
+        SecretRace::Goblin => 9,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]

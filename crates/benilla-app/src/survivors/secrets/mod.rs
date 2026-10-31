@@ -14,7 +14,16 @@
 //! A kill or chest that crosses a threshold unlocks mid-run.
 //!
 //! Each unlock writes one [`Revealed`], for the banner (a later task).
-
+//!
+//! **Playing one.** A look is `(display, race, sex)`; a secret race's looks carry a look code,
+//! [`look_code`] (100 + its index), in the race slot, one look per display variant. Only the
+//! spawn turns the code into the unit's race (9 for the Goblin, 0 for a creature) and scale. A
+//! saved character names its secret by key (`Character::secret`), never by code, so a reordered
+//! table still loads it; an unknown key falls back to the class's first look.
+//!
+//! The run also tracks, for the Imp and the Centaur, when the final boss arrived and fell
+//! (`Run::final_boss_at`, `Run::won_at`) and the longest the hero stood still ([`Stillness`],
+//! in run time, so the pauses and card screens never count).
 
 pub(super) mod data;
 
@@ -271,6 +280,95 @@ fn track_stillness(mut run: ResMut<Run>, hero: Query<&Transform, With<super::her
     run.stillness.step(h.translation, now);
 }
 
+// --- Looks. ---
+
+/// A secret race's code in a look's race slot: past every `ChrRaces` id.
+const LOOK_BASE: u8 = 100;
+
+pub(super) fn look_code(r: SecretRace) -> u8 {
+    LOOK_BASE + r as u8
+}
+
+pub(super) fn from_look_code(code: u8) -> Option<SecretRace> {
+    code.checked_sub(LOOK_BASE)
+        .and_then(|i| SecretRace::ALL.get(usize::from(i)).copied())
+}
+
+/// The race `UNIT_FIELD_BYTES_0` carries for a look's race slot.
+pub(super) fn unit_race(code: u8) -> u8 {
+    from_look_code(code).map_or(code, data::unit_race)
+}
+
+/// The hero's render scale for a look's race slot.
+pub(super) fn look_scale(code: u8) -> f32 {
+    from_look_code(code).map_or(1.0, |r| def(r).scale)
+}
+
+/// The race's name for a look's race slot, secret or not.
+pub(super) fn race_label(code: u8) -> &'static str {
+    from_look_code(code).map_or_else(|| crate::char_select::race_name(code), |r| def(r).name)
+}
+
+/// A creature secret has one body: the gender pair hides.
+pub(super) fn one_body(code: u8) -> bool {
+    from_look_code(code).is_some_and(|r| r != SecretRace::Goblin)
+}
+
+/// `AnimationData.dbc` Attack1H: the cast a model without spell-cast animations plays.
+const ATTACK_1H: u16 = 17;
+
+/// The one-shot a spell cast adds on a caster: a race without cast animations swings its
+/// weapon instead, so the cast never stands frozen.
+pub(super) fn cast_fallback(casts: bool) -> Option<u16> {
+    (!casts).then_some(ATTACK_1H)
+}
+
+/// Whether a look's race slot casts with the attack swing ([`cast_fallback`]).
+pub(super) fn swings_to_cast(code: u8) -> bool {
+    from_look_code(code).is_some_and(|r| cast_fallback(def(r).casts).is_some())
+}
+
+/// The unlocked secret races' looks for a class, `(display, look code, sex)`, one per display
+/// variant, in [`SecretRace::ALL`]'s order.
+pub(super) fn secret_looks(class_id: u8, unlocked: &[String]) -> Vec<(u32, u8, u8)> {
+    SecretRace::ALL
+        .into_iter()
+        .filter(|&r| unlocked.iter().any(|k| k == def(r).key))
+        .filter(|&r| def(r).classes.contains(&class_id))
+        .flat_map(|r| {
+            def(r)
+                .displays
+                .iter()
+                .map(move |&d| (d, look_code(r), data::display_sex(d)))
+        })
+        .collect()
+}
+
+/// A secret race's button face in the race picker: its icon, loaded once the archives are.
+#[derive(Component)]
+pub(super) struct SecretFace(pub &'static str);
+
+#[derive(Component)]
+struct FaceDone;
+
+fn fill_secret_faces(
+    mut commands: Commands,
+    mut faces: Query<(Entity, &mut ImageNode, &SecretFace), Without<FaceDone>>,
+    mut assets: Option<ResMut<benilla_assets::WorldAssets>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(assets) = assets.as_deref_mut() else {
+        return;
+    };
+    for (e, mut img, face) in &mut faces {
+        if let Some(h) = assets.sprite_texture(&format!("{}.blp", face.0), &mut images) {
+            img.image = h;
+            img.color = Color::WHITE;
+        }
+        commands.entity(e).insert(FaceDone);
+    }
+}
+
 // --- Saving. ---
 
 fn path() -> Option<std::path::PathBuf> {
@@ -332,7 +430,8 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(in_state(Phase::Playing)),
         )
         .add_systems(Update, (load_once, count).chain())
-        .add_systems(OnEnter(Phase::Menu), save_if_dirty);
+        .add_systems(OnEnter(Phase::Menu), save_if_dirty)
+        .add_systems(Update, fill_secret_faces);
 }
 
 /// Read the file once, on the first frame (as `characters` does, for the page's store).
@@ -731,6 +830,89 @@ mod tests {
         assert_eq!(family("Hogger's Pet"), None);
     }
 
+    // --- Looks. ---
+
+    #[test]
+    fn a_skeleton_paladin_only_once_unlocked() {
+        let unlocked = vec!["skeleton".to_string()];
+        let looks = secret_looks(PALADIN, &unlocked);
+        assert_eq!(looks.len(), data::def(SecretRace::Skeleton).displays.len());
+        assert!(looks
+            .iter()
+            .all(|&(_, r, s)| from_look_code(r) == Some(SecretRace::Skeleton) && s == 0));
+        assert!(secret_looks(PALADIN, &[]).is_empty());
+        // A Skeleton cannot be a Mage.
+        assert!(secret_looks(8, &unlocked).is_empty());
+    }
+
+    #[test]
+    fn goblin_looks_come_in_both_sexes_and_the_character_race() {
+        let looks = secret_looks(8, &["goblin".to_string()]);
+        assert!(looks.iter().any(|l| l.2 == 0) && looks.iter().any(|l| l.2 == 1));
+        let code = look_code(SecretRace::Goblin);
+        assert_eq!(unit_race(code), 9);
+        assert!(!one_body(code));
+        assert_eq!(unit_race(look_code(SecretRace::Murloc)), 0);
+        assert!(one_body(look_code(SecretRace::Murloc)));
+        // A normal race passes through.
+        assert_eq!(unit_race(5), 5);
+        assert_eq!(look_scale(5), 1.0);
+        assert_eq!(race_label(look_code(SecretRace::Imp)), "Imp");
+        assert_eq!(from_look_code(99), None);
+        assert_eq!(from_look_code(LOOK_BASE + 13), None);
+    }
+
+    #[test]
+    fn a_race_without_cast_animations_casts_with_the_swing() {
+        assert_eq!(cast_fallback(false), Some(ATTACK_1H));
+        assert_eq!(cast_fallback(true), None);
+        assert!(swings_to_cast(look_code(SecretRace::Skeleton)));
+        assert!(!swings_to_cast(look_code(SecretRace::Ogre)));
+        assert!(!swings_to_cast(1));
+    }
+
+    #[test]
+    fn the_picked_race_again_cycles_its_skins() {
+        let m = look_code(SecretRace::Murloc);
+        let looks = vec![(1, 1, 0), (2, 1, 1), (31, m, 0), (188, m, 0), (1755, m, 0)];
+        assert_eq!(super::super::menu::next_skin(&looks, 2), Some(3));
+        assert_eq!(super::super::menu::next_skin(&looks, 4), Some(2));
+        // One look of its race and sex: itself.
+        assert_eq!(super::super::menu::next_skin(&looks, 0), Some(0));
+    }
+
+    fn saved(text: &str) -> super::super::characters::Character {
+        toml::from_str(text).expect("a saved character loads")
+    }
+
+    const OLD_SAVE: &str =
+        "id = 3\nname = \"Thaldor\"\nclass_id = 2\nrace = 1\nsex = 0\ncompletions = []\n";
+
+    #[test]
+    fn an_old_character_loads_without_a_secret() {
+        let c = saved(OLD_SAVE);
+        assert_eq!(c.secret, None);
+        assert_eq!(c.skin, 0);
+        let looks = vec![(1, 1, 0), (2, 3, 0)];
+        assert_eq!(super::super::characters::look_of(&c, &looks), Some(0));
+    }
+
+    #[test]
+    fn a_secret_character_wears_its_skin_and_an_unknown_one_falls_back() {
+        let s = look_code(SecretRace::Skeleton);
+        let looks = vec![(1, 1, 0), (2, 3, 0), (158, s, 0), (200, s, 0), (201, s, 0)];
+        let mut c = saved(&format!("{OLD_SAVE}secret = \"skeleton\"\nskin = 1\n"));
+        // The stored code is stale; the key decides.
+        c.race = 1;
+        assert_eq!(super::super::characters::look_of(&c, &looks), Some(3));
+        c.skin = 9;
+        assert_eq!(super::super::characters::look_of(&c, &looks), Some(2));
+        let naga = saved(&format!("{OLD_SAVE}secret = \"naga\"\n"));
+        assert_eq!(super::super::characters::look_of(&naga, &looks), Some(0));
+        assert_eq!(naga.race_label(), "Unknown");
+        assert_eq!(c.race_label(), "Skeleton");
+    }
+
     // --- Counting in a world. ---
 
     fn world() -> World {
@@ -852,6 +1034,8 @@ mod tests {
                 class_id: WARLOCK,
                 race: 1,
                 sex: 0,
+                secret: None,
+                skin: 0,
                 completions: hero,
                 talents: Default::default(),
             });
