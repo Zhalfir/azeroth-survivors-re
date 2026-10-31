@@ -105,9 +105,27 @@ pub(super) fn plugin(app: &mut App) {
     FrameCap::load();
     // wasm has no thread to sleep, and the browser paces its own frames.
     #[cfg(not(target_arch = "wasm32"))]
-    app.add_systems(Last, hold_frame.after(super::frametime::frame_end));
+    app.add_systems(
+        Last,
+        (hint_frame, hold_frame)
+            .chain()
+            .after(super::frametime::frame_end),
+    );
     #[cfg(target_arch = "wasm32")]
     let _ = app;
+}
+
+/// The frame's work so far against the cap's target, to the OS's performance hints (Android
+/// ADPF, `benilla_world::thread_qos::report_frame`), before the cap's sleep so the sleep never
+/// counts as work. Uncapped aims at 60.
+#[cfg(not(target_arch = "wasm32"))]
+fn hint_frame(samples: Res<super::frametime::FrameSamples>) {
+    if let Some(started) = samples.frame_started() {
+        let target = FrameCap::current()
+            .target()
+            .unwrap_or(Duration::from_secs_f64(1.0 / 60.0));
+        benilla_world::thread_qos::report_frame(started.elapsed(), target);
+    }
 }
 
 /// Sleep out the rest of the frame: coarse `thread::sleep` to 1 ms short of the target (the OS

@@ -6,6 +6,19 @@ use bevy::prelude::*;
 
 use crate::thread_qos;
 
+/// The IO pool's share of the cores. Half suits a desktop's 10-16 cores and a dense teleport's
+/// burst of synchronous parses; on an 8-core phone half for IO plus async compute's quarter left the
+/// frame's compute pool ~2 threads, the two busy workers seen on the Galaxy Tab S9+ while five cores
+/// idled (2026-10-31). Android keeps two IO threads and gives the rest to compute.
+#[cfg(not(target_os = "android"))]
+const IO_PERCENT: f32 = 0.5;
+#[cfg(target_os = "android")]
+const IO_PERCENT: f32 = 0.25;
+#[cfg(not(target_os = "android"))]
+const IO_MAX_THREADS: usize = 8;
+#[cfg(target_os = "android")]
+const IO_MAX_THREADS: usize = 2;
+
 /// `DefaultPlugins` with benilla's engine tuning applied, around the caller's primary window.
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_mut))]
 pub fn tuned_default_plugins(mut primary_window: Window) -> PluginGroupBuilder {
@@ -49,8 +62,8 @@ pub fn tuned_default_plugins(mut primary_window: Window) -> PluginGroupBuilder {
             task_pool_options: TaskPoolOptions {
                 io: bevy::app::TaskPoolThreadAssignmentPolicy {
                     min_threads: 2,
-                    max_threads: 8,
-                    percent: 0.5,
+                    max_threads: IO_MAX_THREADS,
+                    percent: IO_PERCENT,
                     on_thread_spawn: Some(std::sync::Arc::new(|| {
                         thread_qos::promote_current_thread(thread_qos::QosClass::UserInitiated)
                     })),

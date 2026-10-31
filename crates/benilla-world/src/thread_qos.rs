@@ -38,8 +38,165 @@ pub fn promote_current_thread(class: QosClass) {
             warn_once!("thread QoS promotion to {class:?} failed (rc={rc})");
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "android")]
+    android::promote(class);
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let _ = class;
+}
+
+/// Android has no QoS classes. Its levers: a display nice value for frame-critical threads, and
+/// the Performance Hint API (ADPF, Android 13+), which takes a session of those threads plus each
+/// frame's actual work time against a target and lets the OS raise clocks and place the threads.
+/// Google advises against pinning cores yourself: the right core type varies by device and many
+/// devices ignore a game's affinity (developer.android.com/games/optimize/adpf). On the Galaxy
+/// Tab S9+ the survivors main thread ran at ~81 % of one core while five cores idled
+/// (2026-10-31). The API is looked up at runtime (`dlsym`), so an older device just runs without.
+#[cfg(target_os = "android")]
+mod android {
+    use std::ffi::c_void;
+    use std::sync::Mutex;
+
+    use super::QosClass;
+    use bevy::prelude::*;
+
+    /// `THREAD_PRIORITY_DISPLAY`: what an app's render threads may take (`URGENT_DISPLAY`, -8,
+    /// is system-only).
+    const DISPLAY_NICE: i32 = -4;
+
+    /// Frame-critical thread ids seen so far, for the hint session.
+    static TIDS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+    pub(super) fn promote(class: QosClass) {
+        if class != QosClass::UserInteractive {
+            return;
+        }
+        let tid = unsafe { libc::gettid() };
+        if unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, DISPLAY_NICE) } != 0 {
+            warn_once!("thread priority: setpriority({DISPLAY_NICE}) refused");
+        }
+        if let Ok(mut tids) = TIDS.lock() {
+            if !tids.contains(&tid) {
+                tids.push(tid);
+            }
+        }
+    }
+
+    type GetManager = unsafe extern "C" fn() -> *mut c_void;
+    type CreateSession = unsafe extern "C" fn(*mut c_void, *const i32, usize, i64) -> *mut c_void;
+    type SessionNanos = unsafe extern "C" fn(*mut c_void, i64) -> i32;
+    type SetThreads = unsafe extern "C" fn(*mut c_void, *const i32, usize) -> i32;
+    type CloseSession = unsafe extern "C" fn(*mut c_void);
+
+    /// The ADPF entry points, resolved once from `libandroid.so`.
+    struct Api {
+        manager: *mut c_void,
+        create: CreateSession,
+        report: SessionNanos,
+        target: SessionNanos,
+        /// Android 14+; without it a grown thread set reopens the session.
+        set_threads: Option<SetThreads>,
+        close: CloseSession,
+    }
+
+    struct Session {
+        api: Api,
+        session: *mut c_void,
+        threads: usize,
+        target_ns: i64,
+    }
+
+    // SAFETY: the session handle is only touched under `SESSION`'s lock; the NDK documents the
+    // session as usable from any thread.
+    unsafe impl Send for Session {}
+
+    static SESSION: Mutex<Option<Option<Session>>> = Mutex::new(None);
+
+    fn api() -> Option<Api> {
+        unsafe {
+            let lib = libc::dlopen(c"libandroid.so".as_ptr(), libc::RTLD_NOW);
+            if lib.is_null() {
+                return None;
+            }
+            let sym = |name: &std::ffi::CStr| {
+                let p = libc::dlsym(lib, name.as_ptr());
+                (!p.is_null()).then_some(p)
+            };
+            let get: GetManager = std::mem::transmute(sym(c"APerformanceHint_getManager")?);
+            let manager = get();
+            if manager.is_null() {
+                return None;
+            }
+            Some(Api {
+                manager,
+                create: std::mem::transmute(sym(c"APerformanceHint_createSession")?),
+                report: std::mem::transmute(sym(c"APerformanceHint_reportActualWorkDuration")?),
+                target: std::mem::transmute(sym(c"APerformanceHint_updateTargetWorkDuration")?),
+                set_threads: sym(c"APerformanceHint_setThreads").map(|p| std::mem::transmute(p)),
+                close: std::mem::transmute(sym(c"APerformanceHint_closeSession")?),
+            })
+        }
+    }
+
+    /// One frame's actual work against its target, both in nanoseconds; called once a frame.
+    pub(super) fn report_frame(work_ns: i64, target_ns: i64) {
+        if work_ns <= 0 || target_ns <= 0 {
+            return;
+        }
+        let tids = TIDS.lock().map(|t| t.clone()).unwrap_or_default();
+        if tids.is_empty() {
+            return;
+        }
+        let Ok(mut slot) = SESSION.lock() else { return };
+        // Resolve once; `Some(None)` means the device has no ADPF, so stop trying.
+        let state = slot.get_or_insert_with(|| {
+            let api = api();
+            if api.is_none() {
+                info!("performance hint: unavailable on this device (Android 13+ needed)");
+            }
+            api.map(|api| Session {
+                api,
+                session: std::ptr::null_mut(),
+                threads: 0,
+                target_ns: 0,
+            })
+        });
+        let Some(s) = state.as_mut() else { return };
+        unsafe {
+            if s.session.is_null() || (s.threads != tids.len() && s.api.set_threads.is_none()) {
+                if !s.session.is_null() {
+                    (s.api.close)(s.session);
+                }
+                s.session = (s.api.create)(s.api.manager, tids.as_ptr(), tids.len(), target_ns);
+                if s.session.is_null() {
+                    warn_once!("performance hint: createSession refused");
+                    *state = None;
+                    return;
+                }
+                info!("performance hint: session over {} frame-critical threads", tids.len());
+                s.threads = tids.len();
+                s.target_ns = target_ns;
+            } else if s.threads != tids.len() {
+                if let Some(set) = s.api.set_threads {
+                    set(s.session, tids.as_ptr(), tids.len());
+                }
+                s.threads = tids.len();
+            }
+            if s.target_ns != target_ns {
+                (s.api.target)(s.session, target_ns);
+                s.target_ns = target_ns;
+            }
+            (s.api.report)(s.session, work_ns);
+        }
+    }
+}
+
+/// Report one frame's actual work time and its target to the OS's performance hints (Android
+/// ADPF; a no-op elsewhere). Call once a frame from the main thread.
+pub fn report_frame(work: std::time::Duration, target: std::time::Duration) {
+    #[cfg(target_os = "android")]
+    android::report_frame(work.as_nanos() as i64, target.as_nanos() as i64);
+    #[cfg(not(target_os = "android"))]
+    let _ = (work, target);
 }
 
 /// Promotes the pipelined-rendering thread, which Bevy spawns with no hook. The exclusive system

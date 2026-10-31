@@ -33,6 +33,10 @@ bevy.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# Android thread priority and affinity (`thread_qos`).
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"
+
 # macOS AppKit calls, at `benilla-app`'s pins so the graph has one objc2.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.2", features = [
