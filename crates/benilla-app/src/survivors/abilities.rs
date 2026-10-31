@@ -689,6 +689,7 @@ pub(super) fn apply_hits(
     mut fx: Fx,
     mut loot: MessageWriter<Loot>,
     mut fields: MessageWriter<FieldChanged>,
+    mut secrets: MessageWriter<super::secrets::SecretEvent>,
 ) {
     let dt = time.delta_secs();
     let now = run.elapsed;
@@ -737,6 +738,7 @@ pub(super) fn apply_hits(
             });
             run.kills += 1;
             super::combatlog::killed(en.def.name);
+            secrets.write(super::secrets::SecretEvent::Kill(en.def.name));
             if en.boss {
                 super::combatlog::event(
                     run.elapsed,

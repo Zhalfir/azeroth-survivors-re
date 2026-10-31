@@ -630,6 +630,7 @@ pub(super) fn collect_gems(
     mut next: ResMut<NextState<Phase>>,
     hero: Query<&Transform, (With<Hero>, Without<Gem>)>,
     mut gems: Query<(Entity, &mut Transform, &mut Gem)>,
+    mut secrets: MessageWriter<super::secrets::SecretEvent>,
 ) {
     let Ok(h) = hero.single() else { return };
     if run.dead_t.is_some() {
@@ -659,6 +660,7 @@ pub(super) fn collect_gems(
                     run.pending_levels += 1;
                     run.banner = Some(("A treasure chest! Choose a power.".into(), 3.0));
                     super::combatlog::event(run.elapsed, "chest opened");
+                    secrets.write(super::secrets::SecretEvent::Chest);
                 }
             }
             commands.entity(e).despawn();

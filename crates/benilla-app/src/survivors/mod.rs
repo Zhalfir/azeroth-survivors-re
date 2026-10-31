@@ -371,6 +371,8 @@ pub(super) struct Run {
     pub version: u32,
     /// A centre-screen announcement and its seconds left.
     pub banner: Option<(String, f32)>,
+    /// The hero's lowest health this run, as a share of the pool (`secrets`: the Furbolg).
+    pub min_hp_frac: f32,
 }
 
 impl Default for Run {
@@ -408,6 +410,7 @@ impl Default for Run {
             bonus: talents::Bonus::default(),
             version: 0,
             banner: None,
+            min_hp_frac: 1.0,
         }
     }
 }

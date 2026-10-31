@@ -25,7 +25,9 @@ use std::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::characters::Characters;
 use super::data::Difficulty;
+use super::{Phase, Run, Selection};
 pub(super) use data::{def, SecretRace};
 
 /// One won run, kept for the conditions that ask how it was won.
@@ -239,9 +241,36 @@ pub(super) fn save(p: &Progress) {
     }
 }
 
+// --- Counting. ---
+
+/// Something a run did that a secret counts.
+#[derive(Message, Clone, Debug)]
+pub(super) enum SecretEvent {
+    /// An enemy died, by name; once per enemy.
+    Kill(&'static str),
+    Chest,
+    /// The run is over, at the results.
+    RunEnd {
+        won: bool,
+        class_id: u8,
+        zone: &'static str,
+        difficulty: Difficulty,
+        secs: f32,
+        min_hp_frac: f32,
+    },
+}
+
+/// A secret race just unlocked.
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Revealed(pub SecretRace);
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Progress>()
-        .add_systems(Update, load_once);
+        .add_message::<SecretEvent>()
+        .add_message::<Revealed>()
+        .add_systems(OnEnter(Phase::GameOver), run_end)
+        .add_systems(Update, (load_once, count).chain())
+        .add_systems(OnEnter(Phase::Menu), save_if_dirty);
 }
 
 /// Read the file once, on the first frame (as `characters` does, for the page's store).
@@ -255,8 +284,105 @@ fn load_once(mut progress: ResMut<Progress>) {
     };
 }
 
+/// The run's end, as entering the results knows it.
+fn run_end(run: Res<Run>, selection: Res<Selection>, mut out: MessageWriter<SecretEvent>) {
+    out.write(SecretEvent::RunEnd {
+        won: run.won,
+        class_id: run.class.id,
+        zone: selection.stage_def().name,
+        difficulty: super::data::difficulty(),
+        secs: run.elapsed,
+        min_hp_frac: run.min_hp_frac,
+    });
+}
+
+/// Count what the run did, reveal what that unlocks, save at the end and on an unlock.
+pub(super) fn count(
+    mut events: MessageReader<SecretEvent>,
+    mut progress: ResMut<Progress>,
+    mut revealed: MessageWriter<Revealed>,
+    chars: Res<Characters>,
+    run: Option<Res<Run>>,
+    auto: Option<Res<super::auto::Auto>>,
+) {
+    // The bot, the Demo and god mode never count.
+    if auto.is_some() || super::hero::god_mode() {
+        events.read().for_each(drop);
+        return;
+    }
+    let p = &mut *progress;
+    let (mut ended, mut counted) = (false, false);
+    for e in events.read() {
+        match *e {
+            SecretEvent::Kill(name) => {
+                if let Some(f) = family(name) {
+                    *p.kills_by_family.entry(f.to_string()).or_default() += 1;
+                    counted = true;
+                }
+            }
+            SecretEvent::Chest => {
+                p.chests += 1;
+                counted = true;
+            }
+            SecretEvent::RunEnd {
+                won,
+                class_id,
+                zone,
+                difficulty,
+                secs,
+                min_hp_frac,
+            } => {
+                if won {
+                    p.wins.push(WinRecord {
+                        class_id,
+                        zone: zone.to_string(),
+                        difficulty: difficulty.name().to_string(),
+                        secs,
+                        min_hp_frac,
+                    });
+                } else {
+                    *p.deaths_by_class.entry(class_id).or_default() += 1;
+                }
+                ended = true;
+            }
+        }
+    }
+    if !ended && !counted {
+        return;
+    }
+    p.dirty = true;
+    // The zone conditions can change only at a run's end, when a completion is recorded.
+    let clears = if ended {
+        Clears::from_parts(chars.list.iter().flat_map(|c| &c.completions), &p.wins)
+    } else {
+        Clears::default()
+    };
+    let found = newly_unlocked(p, &clears);
+    let elapsed = run.map_or(0.0, |r| r.elapsed);
+    for &r in &found {
+        p.unlocked.push(def(r).key.to_string());
+        revealed.write(Revealed(r));
+        super::combatlog::event(elapsed, format!("secret revealed: {}", def(r).name));
+    }
+    if ended || !found.is_empty() {
+        save(p);
+        p.dirty = false;
+    }
+}
+
+/// A run left from the pause menu never reaches the results: keep what it counted.
+fn save_if_dirty(mut progress: ResMut<Progress>) {
+    if progress.dirty {
+        save(&progress);
+        progress.dirty = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::message::Messages;
+    use bevy::ecs::system::RunSystemOnce;
+
     use super::*;
 
     fn win(class_id: u8, zone: &str, d: Difficulty, secs: f32, min_hp_frac: f32) -> WinRecord {
@@ -486,5 +612,147 @@ mod tests {
         assert_eq!(family("Kobold Miner"), None);
         assert_eq!(family("Defias Thug"), None);
         assert_eq!(family("Hogger's Pet"), None);
+    }
+
+    // --- Counting in a world. ---
+
+    fn world() -> World {
+        let mut w = World::new();
+        w.init_resource::<Messages<SecretEvent>>();
+        w.init_resource::<Messages<Revealed>>();
+        w.insert_resource(Progress::default());
+        w.init_resource::<Characters>();
+        w
+    }
+
+    fn send(w: &mut World, e: SecretEvent) {
+        w.resource_mut::<Messages<SecretEvent>>().write(e);
+    }
+
+    fn run_end_event(won: bool, class_id: u8, min_hp_frac: f32) -> SecretEvent {
+        SecretEvent::RunEnd {
+            won,
+            class_id,
+            zone: "Mulgore",
+            difficulty: Difficulty::Normal,
+            secs: 650.0,
+            min_hp_frac,
+        }
+    }
+
+    fn revealed(w: &mut World) -> Vec<SecretRace> {
+        w.resource_mut::<Messages<Revealed>>()
+            .drain()
+            .map(|r| r.0)
+            .collect()
+    }
+
+    #[test]
+    fn kills_count_by_family() {
+        let mut w = world();
+        for _ in 0..3 {
+            send(&mut w, SecretEvent::Kill("Murloc Forager"));
+        }
+        send(&mut w, SecretEvent::Kill("Kobold Miner"));
+        // One system, as the app runs it: its reader keeps its place between frames.
+        let system = w.register_system(count);
+        w.run_system(system).unwrap();
+        let p = w.resource::<Progress>();
+        assert_eq!(p.kills_by_family.get("murloc"), Some(&3));
+        assert_eq!(p.kills_by_family.len(), 1);
+        // Read once: the next frame counts nothing again.
+        w.run_system(system).unwrap();
+        assert_eq!(w.resource::<Progress>().kills_by_family["murloc"], 3);
+    }
+
+    #[test]
+    fn the_bot_never_counts() {
+        let mut w = world();
+        w.insert_resource(super::super::auto::for_demo(0, 0));
+        send(&mut w, SecretEvent::Kill("Murloc Forager"));
+        send(&mut w, SecretEvent::Chest);
+        send(&mut w, run_end_event(false, PALADIN, 0.0));
+        w.run_system_once(count).unwrap();
+        assert_eq!(*w.resource::<Progress>(), Progress::default());
+        assert!(revealed(&mut w).is_empty());
+    }
+
+    #[test]
+    fn a_lost_paladin_run_is_one_death() {
+        let mut w = world();
+        send(&mut w, run_end_event(false, PALADIN, 0.0));
+        w.run_system_once(count).unwrap();
+        let p = w.resource::<Progress>();
+        assert_eq!(p.deaths_by_class.get(&PALADIN), Some(&1));
+        assert!(p.wins.is_empty());
+    }
+
+    #[test]
+    fn a_won_druid_run_keeps_its_lowest_health() {
+        let mut w = world();
+        send(&mut w, run_end_event(true, DRUID, 0.6));
+        w.run_system_once(count).unwrap();
+        let p = w.resource::<Progress>();
+        assert_eq!(p.wins.len(), 1);
+        assert_eq!(p.wins[0].min_hp_frac, 0.6);
+        assert_eq!(p.wins[0].zone, "Mulgore");
+        assert!(p.deaths_by_class.is_empty());
+        assert!(p.is_unlocked(SecretRace::Furbolg));
+        assert_eq!(revealed(&mut w), vec![SecretRace::Furbolg]);
+    }
+
+    #[test]
+    fn the_hundredth_chest_reveals_the_kobold_mid_run_once() {
+        let mut w = world();
+        w.resource_mut::<Progress>().chests = 99;
+        let system = w.register_system(count);
+        send(&mut w, SecretEvent::Chest);
+        w.run_system(system).unwrap();
+        assert_eq!(revealed(&mut w), vec![SecretRace::Kobold]);
+        send(&mut w, SecretEvent::Chest);
+        w.run_system(system).unwrap();
+        assert!(revealed(&mut w).is_empty());
+        assert_eq!(w.resource::<Progress>().unlocked, vec!["kobold".to_string()]);
+    }
+
+    #[test]
+    fn two_unlocks_at_once_are_two_reveals() {
+        let mut w = world();
+        // One more Warlock Mythic win with the whole Mythic pass held by a character.
+        let mut hero = Vec::new();
+        for m in super::super::data::MAPS {
+            hero.push((m.name.to_string(), "Mythic".to_string()));
+        }
+        w.resource_mut::<Characters>()
+            .list
+            .push(super::super::characters::Character {
+                id: 1,
+                name: "Test".into(),
+                class_id: WARLOCK,
+                race: 1,
+                sex: 0,
+                completions: hero,
+                talents: Default::default(),
+            });
+        send(
+            &mut w,
+            SecretEvent::RunEnd {
+                won: true,
+                class_id: WARLOCK,
+                zone: "Naxxramas",
+                difficulty: Difficulty::Mythic,
+                secs: 1300.0,
+                min_hp_frac: 0.2,
+            },
+        );
+        w.run_system_once(count).unwrap();
+        assert_eq!(
+            revealed(&mut w),
+            vec![
+                SecretRace::Dragonspawn,
+                SecretRace::Quillboar,
+                SecretRace::Felguard
+            ]
+        );
     }
 }
