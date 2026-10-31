@@ -155,9 +155,12 @@ mod android {
 
     /// One frame's actual work against its target, both in nanoseconds; called once a frame.
     pub(super) fn report_frame(work_ns: i64, target_ns: i64) {
-        // `WOW_ADPF=0` (`android-env.txt`) turns the hints off: the A/B lever.
-        static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *OFF.get_or_init(|| std::env::var("WOW_ADPF").as_deref() == Ok("0")) {
+        // Off unless `WOW_ADPF=1` (`android-env.txt`). Measured on the Galaxy Tab S9+ (2026-10-31,
+        // three cool-start runs): with the hints on, the late game spent twice as many seconds
+        // under 35 fps and the GPU frame grew from ~20 to ~29 ms once the tablet throttled; the
+        // CPU boost the hints buy takes heat budget the GPU needed. Kept as a lever.
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ON.get_or_init(|| std::env::var("WOW_ADPF").as_deref() == Ok("1")) {
             return;
         }
         if work_ns <= 0 || target_ns <= 0 {
