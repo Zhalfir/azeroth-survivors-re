@@ -57,7 +57,7 @@ pub(super) fn plugin(app: &mut App) {
             cap: TEXT_CAP,
             reuse_layout: true,
         })
-        .add_systems(Update, (crowd_decals, crowd_anim_lod, room_focus));
+        .add_systems(Update, (crowd_decals, crowd_anim_lod, room_focus, card_rays));
 }
 
 /// Whether ordinary enemies keep their shadow and footprints: only on High. Off Android there is
@@ -256,5 +256,26 @@ mod tests {
         let fov = std::f32::consts::FRAC_PI_4;
         assert!(screen_share(0.6, 30.0, fov) > TINY_EXIT);
         assert!(screen_share(0.6, 90.0, fov) < TINY_ENTER);
+    }
+}
+
+/// The level-up screen's rotating rays: a 1400 px conic gradient of 24 stops redrawn every frame
+/// behind the cards, the heaviest of the card screen's full-screen layers on a phone GPU (the
+/// screen ran at ~20 fps on the tablet, 2026-10-31). Shown on High only, like the crowd's decals.
+fn card_rays(
+    #[cfg(target_os = "android")] graphics: Option<Res<super::graphics::Graphics>>,
+    mut rays: Query<&mut Visibility, With<super::cards::Rays>>,
+) {
+    let full = full_crowd_detail(
+        #[cfg(target_os = "android")]
+        graphics.as_deref(),
+    );
+    let want = if full {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut rays {
+        v.set_if_neq(want);
     }
 }

@@ -426,10 +426,10 @@ pub(super) fn animate_cards(
         let card = &mut *card;
         card.t += dt;
         if card.t < 0.0 {
-            *vis = Visibility::Hidden;
+            vis.set_if_neq(Visibility::Hidden);
             continue;
         }
-        *vis = Visibility::Inherited;
+        vis.set_if_neq(Visibility::Inherited);
         let deal = (card.t / DEAL_SECS).clamp(0.0, 1.0);
         let e = ease_out_back(deal);
         let hot = *interaction != Interaction::None && chosen.is_none() && deal >= 1.0;
@@ -475,14 +475,29 @@ pub(super) fn animate_cards(
         tf.scale = Vec2::new(s * squash, s * (1.0 + card.tilt.y.abs() * 0.02));
         tf.rotation = Rot2::degrees((1.0 - e) * -14.0 + lean);
         let rc = card.rarity.color();
-        if let Some(sh) = shadow.0.first_mut() {
-            sh.color = rc.with_alpha((0.25 + 0.6 * h) * (1.0 - pick_fade));
-            sh.blur_radius = Val::Px(18.0 + 22.0 * h);
-            sh.spread_radius = Val::Px(2.0 + 4.0 * h);
-            sh.y_offset = Val::Px(6.0 + 10.0 * h);
+        // The glow follows hover and the pick; written only when it changes, since a blurred
+        // shadow rewritten every frame kept the card screen re-preparing it (the screen ran at
+        // ~20 fps on the tablet, 2026-10-31).
+        let color = rc.with_alpha((0.25 + 0.6 * h) * (1.0 - pick_fade));
+        let blur = Val::Px((18.0 + 22.0 * h).round());
+        let spread = Val::Px((2.0 + 4.0 * h).round());
+        let y = Val::Px((6.0 + 10.0 * h).round());
+        let stale = shadow.0.first().is_some_and(|sh| {
+            sh.blur_radius != blur
+                || sh.spread_radius != spread
+                || sh.y_offset != y
+                || (sh.color.alpha() - color.alpha()).abs() > 0.02
+        });
+        if stale {
+            if let Some(sh) = shadow.0.first_mut() {
+                sh.color = color;
+                sh.blur_radius = blur;
+                sh.spread_radius = spread;
+                sh.y_offset = y;
+            }
         }
         if pick_fade >= 1.0 {
-            *vis = Visibility::Hidden;
+            vis.set_if_neq(Visibility::Hidden);
         }
         if card.index < shine_at.len() {
             shine_at[card.index] = Some(card.t);
@@ -493,7 +508,12 @@ pub(super) fn animate_cards(
             continue;
         };
         let u = ((t - DEAL_SECS * 0.6) / 0.5).clamp(0.0, 1.0);
-        node.left = Val::Px(-120.0 + u * (CARD_W + 200.0));
+        // Written only while the shine moves: a `Node` write relays out the UI, and the shine
+        // used to rewrite its finished position every frame.
+        let left = Val::Px((-120.0 + u * (CARD_W + 200.0)).round());
+        if node.left != left {
+            node.left = left;
+        }
     }
     if let Some((i, t)) = pending.0.as_mut() {
         *t += dt;
