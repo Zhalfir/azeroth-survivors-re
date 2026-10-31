@@ -39,13 +39,18 @@ fn main() {
     }
     // A panic leaves the process alive with a dead event loop, and the next launch then fails to
     // build one ("Failed to build event loop: RecreationAttempt") until the app is force-closed
-    // (tablet, 2026-10-31). End the process shortly after any panic; the half second lets the
-    // crash reporter that `run_survivors` chains after this hook write its report first.
+    // (tablet, 2026-10-31). End the process after any panic, once the crash reporter that
+    // `run_survivors` chains after this hook has written its report (symbolising the backtrace
+    // can take a while on a cold start), or after 3 s at the latest. Any thread: Bevy runs the
+    // systems that panic (the talent page's did) on its workers, not the main thread.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         default_hook(info);
         std::thread::spawn(|| {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !benilla_app::crash_report_done() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
             std::process::exit(101);
         });
     }));

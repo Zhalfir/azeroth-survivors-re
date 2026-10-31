@@ -25,7 +25,16 @@ pub(crate) fn install(build: BuildId) {
     std::panic::set_hook(Box::new(move |info| {
         previous(info);
         report(info, build, started.elapsed());
+        REPORT_DONE.store(true, Ordering::SeqCst);
     }));
+}
+
+/// Set once the first panic's report has been written (or skipped). A launcher that ends the
+/// process after a panic waits on it ([`crate::crash_report_done`]), so the report is not cut off.
+static REPORT_DONE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn report_done() -> bool {
+    REPORT_DONE.load(Ordering::SeqCst)
 }
 
 // The injected test panic (`WOW_CRASH_INJECT=<at_secs>`) lives in `perf::crash_inject`, behind
