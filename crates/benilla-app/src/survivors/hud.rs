@@ -562,7 +562,8 @@ pub(super) fn setup_hud(
                         },
                     ));
                 });
-                // The clock, with the level and the kill count on one line under it.
+                // The clock, the 2× toggle right of it (balanced by a blank on its left so the
+                // clock stays centred), with the level and the kill count on one line under it.
                 row.spawn(Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
@@ -570,7 +571,16 @@ pub(super) fn setup_hud(
                     ..default()
                 })
                 .with_children(|col| {
-                    col.spawn((TimerText, centered(f, "00:00", 34.0, Color::WHITE)));
+                    col.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    })
+                    .with_children(|clock| {
+                        super::speed::spawn_balance(clock);
+                        clock.spawn((TimerText, centered(f, "00:00", 34.0, Color::WHITE)));
+                        super::speed::spawn_button(clock, f);
+                    });
                     col.spawn(Node {
                         column_gap: Val::Px(14.0),
                         ..default()

@@ -29,6 +29,7 @@ mod mobility;
 mod records;
 mod secrets;
 mod settings;
+mod speed;
 mod talents;
 #[cfg(target_os = "android")]
 mod touch;
@@ -74,6 +75,7 @@ impl Plugin for SurvivorsPlugin {
                 detail::plugin,
                 bossbar::plugin,
                 secrets::plugin,
+                speed::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()

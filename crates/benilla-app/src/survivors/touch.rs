@@ -8,7 +8,7 @@
 //! - In play, a finger that lands on the left half is a floating joystick that holds W/A/S/D and
 //!   points the cursor (the hero faces it) the way it runs; a finger on the right half aims the
 //!   cursor; the round buttons tap F (the class movement spell), C (lock / free the camera) and
-//!   Escape (pause); two fingers pinch the camera in and out through the wheel. With the camera
+//!   Escape (pause), and the HUD's 2× toggle by the clock taps X (`super::speed`); two fingers pinch the camera in and out through the wheel. With the camera
 //!   free, a finger on the right half drags it around the hero instead, as a held right button.
 //!
 //! Each synthesized input is written both as its own message and as a [`WindowEvent`], as
@@ -136,6 +136,18 @@ type ButtonRects<'w, 's> = Query<
     ),
 >;
 
+/// The HUD's 2× toggle, a play button outside this overlay.
+type SpeedRects<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static ComputedNode,
+        &'static UiGlobalTransform,
+        &'static InheritedVisibility,
+    ),
+    With<super::speed::SpeedButton>,
+>;
+
 #[allow(clippy::too_many_arguments)]
 fn translate_touches(
     mut touches: MessageReader<TouchInput>,
@@ -143,6 +155,7 @@ fn translate_touches(
     rig: Res<CamRig>,
     mut state: ResMut<TouchState>,
     play_buttons: ButtonRects,
+    speed_buttons: SpeedRects,
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut keys: MessageWriter<KeyboardInput>,
     mut buttons: MessageWriter<MouseButtonInput>,
@@ -192,7 +205,9 @@ fn translate_touches(
                         cursor_to = Some(pos);
                         Role::Mouse
                     }
-                } else if let Some(code) = button_at(pos, window.scale_factor(), &play_buttons) {
+                } else if let Some(code) = button_at(pos, window.scale_factor(), &play_buttons)
+                    .or_else(|| speed_at(pos, window.scale_factor(), &speed_buttons))
+                {
                     state.tapped.push(code);
                     let ev = key(code, true);
                     events.write(WindowEvent::KeyboardInput(ev.clone()));
@@ -373,6 +388,19 @@ fn button_at(pos: Vec2, scale: f32, buttons: &ButtonRects) -> Option<KeyCode> {
         .iter()
         .find(|(_, node, tf, vis)| vis.get() && at.distance(tf.translation) < node.size().x * 0.75)
         .map(|(b, ..)| b.0)
+}
+
+/// [`super::speed::KEY`] when `pos` (logical pixels) is on the HUD's 2× toggle: its whole box,
+/// with a few units' slop for a thumb.
+fn speed_at(pos: Vec2, scale: f32, buttons: &SpeedRects) -> Option<KeyCode> {
+    let at = pos * scale;
+    buttons
+        .iter()
+        .any(|(node, tf, vis)| {
+            let half = node.size() * 0.5 + Vec2::splat(6.0 * scale);
+            vis.get() && node.size().x > 0.0 && (at - tf.translation).abs().cmple(half).all()
+        })
+        .then_some(super::speed::KEY)
 }
 
 fn circle(radius: f32, color: Color, place: impl FnOnce(&mut Node)) -> impl Bundle {
