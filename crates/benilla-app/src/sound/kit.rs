@@ -303,6 +303,23 @@ fn claim_voice(out: &mut SoundOutput, candidate_amp: f32) -> bool {
     }
 }
 
+/// The live kit channels the voice cap may not steal, each as `kit (name) loop|latch on source`,
+/// for the ceiling report in [`super::poll_mix_health`]: once these fill [`SOFTWARE_CHANNELS`],
+/// every new one-shot is refused, so the list names what holds the ceiling.
+pub(super) fn unstealable_census(out: &SoundOutput, kits: Option<&SoundKits>) -> Vec<String> {
+    out.channels
+        .iter()
+        .filter(|c| !stealable(c.looping, c.latch))
+        .map(|c| {
+            let name = kits
+                .and_then(|k| k.catalog.get(c.kit))
+                .map_or("?", |k| k.name.as_str());
+            let what = if c.looping { "loop" } else { "latch" };
+            format!("{} ({name}) {what} on {:?}", c.kit, c.source)
+        })
+        .collect()
+}
+
 /// Can the voice cap steal this channel? Never a loop, whose loss leaves a hole that stays open,
 /// and never a latch holder: its liveness is the unit's latch, so stealing it would let the unit
 /// fire again at once. The emote voice holds no latch, only a slot the next one stops.

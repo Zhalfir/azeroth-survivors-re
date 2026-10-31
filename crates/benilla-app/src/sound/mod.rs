@@ -528,6 +528,8 @@ fn poll_mix_health(
     mut since_report: Local<std::time::Duration>,
     mut last_refused: Local<u64>,
     mut peak_voices: Local<usize>,
+    mut last_denied: Local<u64>,
+    kits: Option<Res<kit::SoundKits>>,
 ) {
     // A recording probe owns the meters: [`meter::MixLevel::take`] resets on read.
     if out.probe.is_some() {
@@ -561,6 +563,23 @@ fn poll_mix_health(
         );
     }
     report_level(level, voices, rate);
+    // The global ceiling's refusals ([`kit::SOFTWARE_CHANNELS`]) were counted and never said: a
+    // ceiling held by voices that never end silences every new sound with no other trace.
+    let new_denied = out.voices_denied - *last_denied;
+    *last_denied = out.voices_denied;
+    if new_denied > 0 {
+        let held = kit::unstealable_census(&out, kits.as_deref());
+        warn!(
+            "audio: {new_denied} sound(s) refused at the {}-voice ceiling in the last {}s; live \
+             {} ({} kit channel(s)), {} unstealable: [{}]",
+            kit::SOFTWARE_CHANNELS,
+            MIX_HEALTH_REPORT.as_secs(),
+            out.live_voices(),
+            out.channels.len(),
+            held.len(),
+            held.join(", "),
+        );
+    }
 }
 
 /// One report window's output side: every layer between the mix and the speaker, each with its
