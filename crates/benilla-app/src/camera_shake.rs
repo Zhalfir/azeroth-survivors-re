@@ -66,7 +66,7 @@ pub(crate) struct CameraShakes {
 
 impl CameraShakes {
     /// Enqueue a shake at a world point.
-    fn add(&mut self, row: CameraShake, pos: Vec3, now: f32) {
+    pub(crate) fn add(&mut self, row: CameraShake, pos: Vec3, now: f32) {
         self.live.push(LiveShake {
             row,
             pos,

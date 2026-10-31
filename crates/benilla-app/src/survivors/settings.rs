@@ -1,7 +1,8 @@
 //! The pause menu's Settings panel: WoW's own sound options — Master, Sound effects, Music and
 //! Ambience, each a volume and (but the effects) an on/off switch, the 1.12 CVars the mixer already
 //! follows and `config.toml` already keeps — and the live damage meter's switch
-//! ([`super::meter`]), the frame cap and the world's upscaler ([`super::upscale`]). Touch-sized: volumes step in tens with − and +.
+//! ([`super::meter`]), the frame cap, the world's upscaler ([`super::upscale`]) and the screen shake
+//! ([`super::feedback`]). Touch-sized: volumes step in tens with − and +.
 
 use bevy::prelude::*;
 
@@ -9,6 +10,7 @@ use super::framecap::FrameCap;
 use super::hud::{HudFont, UiAction};
 use super::meter::{save_setting, MeterSetting};
 use super::units::DamageNumbers;
+use super::feedback::ShakeSetting;
 use super::upscale::Upscaler;
 use super::Phase;
 use crate::cvars::Cvars;
@@ -42,6 +44,7 @@ enum SettingsButton {
     Numbers,
     FrameCap,
     Upscaler,
+    Shake,
     Back,
 }
 
@@ -54,6 +57,7 @@ enum Readout {
     Numbers,
     FrameCap,
     Upscaler,
+    Shake,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -282,6 +286,29 @@ fn spawn_panel(commands: &mut Commands, font: &Handle<Font>) {
                 );
             });
             root.spawn(Node {
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: Val::Px(310.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|c| {
+                    c.spawn(text(font, "Screen shake", 18.0, Color::WHITE));
+                });
+                button(
+                    row,
+                    SettingsButton::Shake,
+                    70.0,
+                    (text(font, "", 16.0, Color::WHITE), Readout::Shake),
+                );
+            });
+            root.spawn(Node {
                 height: Val::Px(8.0),
                 ..default()
             });
@@ -347,6 +374,9 @@ fn press(
             SettingsButton::FrameCap => {
                 FrameCap::cycle();
             }
+            SettingsButton::Shake => {
+                ShakeSetting::cycle();
+            }
             SettingsButton::Upscaler => {
                 Upscaler::cycle();
             }
@@ -395,6 +425,7 @@ fn readouts(
             Readout::Numbers => DamageNumbers::current().name().to_string(),
             Readout::FrameCap => FrameCap::current().name().to_string(),
             Readout::Upscaler => Upscaler::current().name().to_string(),
+            Readout::Shake => ShakeSetting::current().name().to_string(),
         };
         if text.0 != want {
             text.0 = want;

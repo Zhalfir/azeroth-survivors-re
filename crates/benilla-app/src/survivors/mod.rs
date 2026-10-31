@@ -11,6 +11,7 @@ mod characters;
 mod combatlog;
 mod data;
 mod enemies;
+mod feedback;
 mod fill;
 mod framecap;
 mod frametime;
@@ -66,6 +67,7 @@ impl Plugin for SurvivorsPlugin {
                 records::plugin,
                 talents::plugin,
                 upscale::plugin,
+                feedback::plugin,
             ))
             .init_state::<Phase>()
             .init_resource::<Rng>()
@@ -90,7 +92,8 @@ impl Plugin for SurvivorsPlugin {
                     hero::aim_cursor,
                     mobility::cast_mobility,
                     hero::drive_hero,
-                    hero::place_camera,
+                    // Before the client's shake adds its offset, which this would overwrite.
+                    hero::place_camera.before(crate::camera_shake::apply_camera_shake),
                     hero::cutaway.after(benilla_world::view::stamp_near_clip),
                     hero::see_through,
                 )
