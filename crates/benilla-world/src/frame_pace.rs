@@ -281,4 +281,32 @@ mod tests {
             assert_eq!(p.pace(raw), raw, "no cadence ⇒ no snapping");
         }
     }
+
+    #[test]
+    fn a_capped_60_on_a_120hz_swapchain_is_snapped_not_passed_through() {
+        // The frame-rate cap at 60 on a 120 Hz Fifo swapchain: every frame is two refreshes, and
+        // the measured deltas alternate a hair either side of 16.7 ms. They are on cadence, so
+        // each is snapped to the one period (the median), an even 60, and none passes raw.
+        let mut p = pacer();
+        let mut paced = Vec::new();
+        for i in 0..WINDOW * 3 {
+            let raw = if i % 2 == 0 { 0.0166 } else { 0.0168 };
+            paced.push((raw, p.pace(raw)));
+        }
+        let (raw_last, last) = *paced.last().unwrap();
+        let (raw_prev, prev) = paced[paced.len() - 2];
+        assert_ne!(raw_last, raw_prev);
+        assert_eq!(
+            last, prev,
+            "alternating deltas come out equal: {last} vs {prev}"
+        );
+        assert!(
+            (last - 0.0167).abs() < 0.0002,
+            "snapped to the period, not a raw delta: {last}"
+        );
+        assert!(
+            paced[WINDOW..].iter().all(|(_, d)| *d == last),
+            "every frame after the window is the same period"
+        );
+    }
 }

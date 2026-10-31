@@ -29,6 +29,11 @@ pub(super) struct FrameSamples {
 }
 
 impl FrameSamples {
+    /// When this frame began (`First`), for the frame-rate cap to measure what is left.
+    pub(super) fn frame_started(&self) -> Option<Instant> {
+        self.started
+    }
+
     pub(super) fn add_cpu(&mut self, ms: f32) {
         self.cpu_sum += ms;
         self.cpu_max = self.cpu_max.max(ms);
@@ -74,7 +79,7 @@ fn frame_start(mut samples: ResMut<FrameSamples>) {
     samples.started = Some(Instant::now());
 }
 
-fn frame_end(mut samples: ResMut<FrameSamples>) {
+pub(super) fn frame_end(mut samples: ResMut<FrameSamples>) {
     if let Some(started) = samples.started {
         samples.add_cpu(started.elapsed().as_secs_f32() * 1000.0);
     }

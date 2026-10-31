@@ -5,6 +5,7 @@
 
 use bevy::prelude::*;
 
+use super::framecap::FrameCap;
 use super::hud::{HudFont, UiAction};
 use super::meter::{save_setting, MeterSetting};
 use super::units::DamageNumbers;
@@ -38,6 +39,7 @@ enum SettingsButton {
     Toggle(&'static str),
     Meter,
     Numbers,
+    FrameCap,
     Back,
 }
 
@@ -48,6 +50,7 @@ enum Readout {
     Toggle(&'static str),
     Meter,
     Numbers,
+    FrameCap,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -230,6 +233,29 @@ fn spawn_panel(commands: &mut Commands, font: &Handle<Font>) {
                 );
             });
             root.spawn(Node {
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: Val::Px(310.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|c| {
+                    c.spawn(text(font, "Frame rate", 18.0, Color::WHITE));
+                });
+                button(
+                    row,
+                    SettingsButton::FrameCap,
+                    70.0,
+                    (text(font, "", 16.0, Color::WHITE), Readout::FrameCap),
+                );
+            });
+            root.spawn(Node {
                 height: Val::Px(8.0),
                 ..default()
             });
@@ -292,6 +318,9 @@ fn press(
             SettingsButton::Numbers => {
                 DamageNumbers::cycle();
             }
+            SettingsButton::FrameCap => {
+                FrameCap::cycle();
+            }
             SettingsButton::Back => open.0 = false,
         }
     }
@@ -335,6 +364,7 @@ fn readouts(
             Readout::Toggle(cvar) => on_off(switch(&cvars, cvar)),
             Readout::Meter => on_off(meter.live),
             Readout::Numbers => DamageNumbers::current().name().to_string(),
+            Readout::FrameCap => FrameCap::current().name().to_string(),
         };
         if text.0 != want {
             text.0 = want;
