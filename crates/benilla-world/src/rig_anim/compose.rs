@@ -129,7 +129,7 @@ pub fn finalize_rig_worlds(
     mut rigs: Query<(
         Entity,
         &mut RigPose,
-        Option<&RigSkin>,
+        Option<Ref<RigSkin>>,
         Has<AnimParked>,
         Has<crate::rig_rider::RigRider>,
     )>,
@@ -185,6 +185,7 @@ pub fn finalize_rig_worlds(
             let Ok(root_g) = globals.get(rig.joints_root).map(|(_, g)| *g) else {
                 return;
             };
+            rig.rows_basis = None;
             // Rig-relative, which translation-equivariant steps allow: at ~9.5 k yards an f32 ULP
             // (~1 mm) per matmul, fresh each frame, shimmers. `WOW_NO_RIG_REBASE=1` turns it off.
             let origin = crate::rig_palette::rebase_origin(root_g.translation());
@@ -196,6 +197,7 @@ pub fn finalize_rig_worlds(
             if let Some(skin) = skin {
                 if let Some(ibp) = ibps.get(&skin.ibp) {
                     palettes.write_rig_worlds(skin, &worlds, ibp, origin);
+                    rig.rows_basis = Some(root_g.affine().matrix3);
                 }
             }
             if !rig.has_special && !root_moved {
@@ -238,13 +240,28 @@ pub fn finalize_rig_worlds(
                 }
             }
         };
+    // Whether rows are rig-relative at all (`WOW_NO_RIG_REBASE=1` measures them from the map).
+    let rebased = crate::rig_palette::rebase_origin(Vec3::ONE) == Vec3::ONE;
+    let mut origin_moves: Vec<(Entity, Vec3)> = Vec::new();
     for &holder in &refresh {
         let Ok((_, rig, skin, _, rider)) = rigs.get_mut(holder) else {
             continue;
         };
         let rig = rig.into_inner();
         // A rider's rows are the rider lane's: no skin, so only the anchors.
-        let skin = skin.filter(|_| !rider);
+        let skin_changed = skin.as_ref().is_some_and(|s| s.is_changed());
+        let skin = skin.as_deref().filter(|_| !rider);
+        // Only the root translated: a still pose with no billboard, arm or anchor re-seat to
+        // redo, on the slot the rows were written to, under the basis they were written in. The
+        // rig-relative rows are exact as they stand; only the origin moves.
+        if rebased && !rig.pose_dirty && !rig.has_special && !skin_changed {
+            if let (Some(_), Ok(root_g)) = (skin, globals.get(rig.joints_root).map(|(_, g)| *g)) {
+                if rig.rows_basis == Some(root_g.affine().matrix3) {
+                    origin_moves.push((holder, root_g.translation()));
+                    continue;
+                }
+            }
+        }
         finalize(rig, skin, &mut globals, &mut cascade, false);
         rig.pose_dirty = false;
     }
@@ -256,14 +273,21 @@ pub fn finalize_rig_worlds(
             }
             let rig = rig.into_inner();
             let mut ignore = Vec::new();
-            let skin = skin.filter(|_| !rider);
+            let skin = skin.as_deref().filter(|_| !rider);
             finalize(rig, skin, &mut globals, &mut ignore, true);
             rig.pose_dirty = false;
         }
     }
+    // After the last `finalize`, which holds the palettes: the translate-only rigs' origins.
+    let moved_only = origin_moves.len();
+    for (holder, at) in origin_moves {
+        if let Ok((_, _, Some(skin), ..)) = rigs.get(holder) {
+            palettes.move_rig_origin(&skin, crate::rig_palette::rebase_origin(at));
+        }
+    }
     if let Some(t0) = cost_t0 {
         eprintln!(
-            "[rig-finalize] refreshed={} ms={:.3}",
+            "[rig-finalize] refreshed={} moved_only={moved_only} ms={:.3}",
             refresh.len(),
             t0.elapsed().as_secs_f32() * 1000.0
         );

@@ -10,7 +10,7 @@ use bevy::math::Affine3A;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 
-use super::AnimParked;
+use super::{evaluates_this_frame, AnimHalfRate, AnimParked};
 use crate::vis_chain::VisChainOnly;
 
 /// A rig's pose buffer, one local per bone in skeleton order, on the `AnimationPlayer`'s entity;
@@ -37,6 +37,9 @@ pub struct RigPose {
     pub anchors: Vec<(u16, Entity)>,
     /// `locals` changed since the last world pass; starts raised so the bind pose is written.
     pub pose_dirty: bool,
+    /// The root frame's rotation and scale when the world pass last wrote the rows: rig-relative
+    /// rows stay exact while the root only translates, so that pass may move the origin alone.
+    pub(crate) rows_basis: Option<bevy::math::Mat3A>,
 }
 
 impl RigPose {
@@ -66,6 +69,7 @@ impl RigPose {
                 .any(|j| j.billboard.is_some() || j.parent_arm.is_some()),
             anchors: Vec::new(),
             pose_dirty: true,
+            rows_basis: None,
         };
         rig.compose();
         rig
@@ -178,10 +182,21 @@ struct Active {
 
 /// Pose every live rig where `animate_targets` runs, after `advance_animations`.
 fn evaluate_rig_poses(
-    mut rigs: Query<(&AnimationPlayer, &ModelAnimations, &mut RigPose), Without<AnimParked>>,
+    mut rigs: Query<
+        (Entity, &AnimationPlayer, &ModelAnimations, &mut RigPose),
+        Without<AnimParked>,
+    >,
+    // Carry (survivors): the half-rate rigs, and the frame parity they take turns on.
+    half_rate: Query<(), With<AnimHalfRate>>,
+    mut frame: Local<u32>,
 ) {
+    *frame = frame.wrapping_add(1);
+    let frame = *frame;
     // Parallel: a rig reads shared clips and writes only its own pose.
-    rigs.par_iter_mut().for_each(|(player, anims, mut rig)| {
+    rigs.par_iter_mut().for_each(|(e, player, anims, mut rig)| {
+        if half_rate.contains(e) && !evaluates_this_frame(frame, e) {
+            return;
+        }
         let src = &anims.pose;
         // The contributing animations in node order, in one scratch per worker thread.
         thread_local! {

@@ -528,8 +528,8 @@ use driver::{drive_animations, drive_hand_grip};
 mod events;
 use events::fire_anim_events;
 pub(crate) use events::{
-    advance_track, footfall_culls, footfall_side, is_footstep_sound, scan_events, AnimSoundEvent,
-    EventFrame, TrackMemory,
+    advance_track, footfall_culls, footfall_side, is_footstep_sound, scan_events, AnimEventsMuted,
+    AnimSoundEvent, EventFrame, TrackMemory,
 };
 
 /// The `$BTH` breath puffs in a snow zone.

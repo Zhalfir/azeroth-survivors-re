@@ -139,6 +139,7 @@ const PUBLISHED: &[(&str, &str)] = &[
     ("particles::render::EFFECT_DRAW_STATS", "record"),
     ("particles::spawn_emitter", "record"),
     ("ride_frame::RideFrame", "record"),
+    ("rig_anim::AnimHalfRate", "record"),
     ("rig_anim::AnimParked", "wall"),
     ("rig_anim::GlobalSeqDrive", "wall"),
     ("rig_anim::PosePost", "wall"),

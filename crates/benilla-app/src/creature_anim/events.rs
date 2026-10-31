@@ -83,6 +83,12 @@ pub(crate) fn footfall_side(ident: &[u8; 4]) -> Option<u8> {
     .then_some(ident[2])
 }
 
+/// Carry (survivors): a unit carrying this fires no event keys, as a parked one does; the keys of
+/// a crowd member out of earshot are footsteps and swings nobody hears. The client never adds it,
+/// so every unit's keys fire as before.
+#[derive(Component)]
+pub(crate) struct AnimEventsMuted;
+
 /// How far (s) into its clip an arm may land and still open the next window at the head: above
 /// a hitchy frame, below the corpse settle's `seek_to(duration)` (every Death clip is over 1 s).
 const FRESH_CLIP_HEAD: f32 = 0.25;
@@ -113,6 +119,7 @@ pub(super) fn fire_anim_events(
         Option<&crate::net::ObjectStore>,
         &GlobalTransform,
         Option<&benilla_world::rig_anim::RigPose>,
+        Has<AnimEventsMuted>,
     )>,
     // The joint roots the composed poses hang off.
     globals: Query<&GlobalTransform>,
@@ -125,7 +132,13 @@ pub(super) fn fire_anim_events(
     names: Res<crate::names::NameCache>,
 ) {
     let catalog = anim_data.as_deref().map(|d| &d.0);
-    for (entity, anims, player, drv, parked, store, world, pose) in &units {
+    for (entity, anims, player, drv, parked, store, world, pose, muted) in &units {
+        // Carry (survivors): muted as an unflagged parked unit is, memories dropped alike.
+        if muted {
+            last.remove(&entity);
+            last_overlay.remove(&entity);
+            continue;
+        }
         // A parked unit's tracks are not scanned, as the reference's second walk never ticks it
         // (`0x683dd0` skips `0x710b90`), unless its template carries `MORE_AUDIBLE` (the
         // `0x607da0` re-link); a missing template reads not audible (`0x623b70`). Dropping the

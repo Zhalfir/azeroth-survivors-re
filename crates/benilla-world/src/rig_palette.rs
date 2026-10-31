@@ -293,6 +293,12 @@ impl RigPalettes {
         }
     }
 
+    /// Move a rig's origin and leave its rows: the root translated and nothing else moved, so the
+    /// rig-relative rows are already exact.
+    pub(crate) fn move_rig_origin(&mut self, rig: &RigSkin, origin: Vec3) {
+        self.set_origin(rig.slot, origin);
+    }
+
     /// Rewrite one rig's rows from its joints' globals relative to `origin`, the holder's
     /// translation; propagated in absolute space, they keep the rounding propagation spent.
     fn write_rig(
