@@ -395,7 +395,10 @@ fn text(font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) -> i
     )
 }
 
-fn button_bundle(action: TalentButton, w: f32, h: f32) -> impl Bundle {
+/// A talent-page button. `edge` is its border colour: Bevy 0.18 panics on a bundle carrying a
+/// component twice, so a caller that wants its own border passes it here instead of adding a
+/// second `BorderColor` (pressing Talents crashed the game that way, tablet 2026-10-31).
+fn button_bundle(action: TalentButton, w: f32, h: f32, edge: Color) -> impl Bundle {
     (
         Button,
         action,
@@ -409,7 +412,7 @@ fn button_bundle(action: TalentButton, w: f32, h: f32) -> impl Bundle {
             ..default()
         },
         BackgroundColor(BUTTON),
-        BorderColor::all(EDGE),
+        BorderColor::all(edge),
     )
 }
 
@@ -457,7 +460,7 @@ fn spawn_page(mut commands: Commands, font: Option<Res<HudFont>>) {
             Pickable::IGNORE,
         ))
         .with_children(|c| {
-            c.spawn(button_bundle(TalentButton::Open, 236.0, 44.0))
+            c.spawn(button_bundle(TalentButton::Open, 236.0, 44.0, EDGE))
                 .with_child(text(f, "Talents", 18.0, Color::WHITE));
         });
 }
@@ -601,16 +604,14 @@ fn rebuild(
                         let have = c.talents[t][r];
                         let open = total >= ROW_GATE * r as u8;
                         let addable = can_add(&c.talents, t, r, points);
-                        col.spawn((
-                            button_bundle(TalentButton::Add(t, r), 228.0, 46.0),
-                            BorderColor::all(if have > 0 {
-                                GREEN
-                            } else if open {
-                                EDGE
-                            } else {
-                                DIM.with_alpha(0.4)
-                            }),
-                        ))
+                        let edge = if have > 0 {
+                            GREEN
+                        } else if open {
+                            EDGE
+                        } else {
+                            DIM.with_alpha(0.4)
+                        };
+                        col.spawn(button_bundle(TalentButton::Add(t, r), 228.0, 46.0, edge))
                         .with_children(|b| {
                             b.spawn((
                                 Node {
@@ -658,9 +659,9 @@ fn rebuild(
             ..default()
         })
         .with_children(|row| {
-            row.spawn(button_bundle(TalentButton::Reset, 180.0, 44.0))
+            row.spawn(button_bundle(TalentButton::Reset, 180.0, 44.0, EDGE))
                 .with_child(text(f, "Reset", 18.0, Color::WHITE));
-            row.spawn(button_bundle(TalentButton::Close, 180.0, 44.0))
+            row.spawn(button_bundle(TalentButton::Close, 180.0, 44.0, EDGE))
                 .with_child(text(f, "Back", 18.0, Color::WHITE));
         });
     });
