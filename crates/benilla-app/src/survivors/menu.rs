@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 use bevy::ui_render::ui_material::MaterialNode;
 
-use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot};
+use super::hud::{looks_for, rgb, start_run, HudFont, MenuRoot, SAFE_BOTTOM, TEXT_FLOOR};
 use super::{data, Phase, Rng, Run, Selection};
 use crate::char_select::race_name;
 use crate::glue::art::{class_tc, race_tc, tc_rect, GlueArt, DIM, GOLD, NAME_EDGE};
@@ -37,15 +37,25 @@ const ROW_PITCH: f32 = 36.0;
 const ROW_H: f32 = 34.0;
 const ROW_W: f32 = 228.0;
 
-/// Enter World's row: its foot over the screen's bottom, its height (`CharSelectEnterWorldButton`'s
+/// Enter World's row: its foot just over the gesture-bar band ([`SAFE_BOTTOM`]), its height (`CharSelectEnterWorldButton`'s
 /// 60), the gap to Demo and Demo's width. The left column ends on the same line
 /// (`super::characters`).
-pub(super) const ENTER_BOTTOM: f32 = 30.0;
+pub(super) const ENTER_BOTTOM: f32 = SAFE_BOTTOM + 4.0;
 const ENTER_H: f32 = 60.0;
 const ENTER_GAP: f32 = 16.0;
 const DEMO_W: f32 = 150.0;
 /// The name line's foot: just over Enter World's row.
 const NAME_BOTTOM: f32 = ENTER_BOTTOM + ENTER_H + 10.0;
+/// The difficulty picker's foot (`super::characters`): over the name line.
+pub(super) const DIFFICULTY_BOTTOM: f32 = NAME_BOTTOM + 34.0;
+
+/// The zone list's last line: how many zones are still locked and what opens the next
+/// ([`super::characters::Unlocks::locked_summary`]), hidden once all are open.
+#[derive(Component)]
+pub(super) struct ZoneSummary;
+
+/// The summary line's tint: `GlueFontHighlightSmall`'s pale gold, a step down from the names.
+const SUMMARY: Color = Color::srgb(0.85, 0.8, 0.65);
 
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum MenuAction {
@@ -529,66 +539,114 @@ fn zone_frame(ui: &mut ChildSpawnerCommands, art: &GlueArt, f: &Handle<Font>) {
             f,
             1.0,
         );
-        for (row, &(i, lo, hi)) in order.iter().enumerate() {
-            let map = &data::MAPS[i];
-            frame
-                .spawn((
-                    MenuAction::Map(i),
-                    Button,
-                    LockHighlight::default(),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(24.0),
-                        top: px(ROW_TOP + row as f32 * ROW_PITCH),
-                        width: px(ROW_W),
-                        height: px(ROW_H),
+        // The rows flow down a column: a locked zone's row leaves the layout
+        // (`super::characters`), and the summary line takes the place of them all.
+        frame
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(24.0),
+                    top: px(ROW_TOP),
+                    width: px(ROW_W),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(ROW_PITCH - ROW_H),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|list| {
+                for &(i, lo, hi) in &order {
+                    zone_row(list, art, f, i, lo, hi);
+                }
+                list.spawn((
+                    ZoneSummary,
+                    Text::new(""),
+                    TextFont {
+                        font: f.clone(),
+                        font_size: 14.0,
                         ..default()
                     },
-                ))
-                .with_children(|b| {
-                    if let Some(hi) = &art.select_highlight {
-                        b.spawn((
-                            Hilight,
-                            Visibility::Hidden,
-                            MaterialNode(hi.clone()),
-                            abs(1.0, -20.0, -6.0, ROW_W + 20.0, ROW_H + 12.0),
-                        ));
-                    }
-                    outlined_text(
-                        b,
-                        abs(1.0, 0.0, 2.0, ROW_W, 16.0),
-                        (),
-                        (),
-                        GlueText {
-                            text: map.name,
-                            size: 15.0,
-                            color: GOLD,
-                            wrap: false,
-                        },
-                        f,
-                        1.0,
-                    );
-                    let levels = if lo == hi {
-                        format!("Level {lo}")
-                    } else {
-                        format!("Level {lo}-{hi}")
-                    };
-                    outlined_text(
-                        b,
-                        abs(1.0, 0.0, 19.0, ROW_W, 14.0),
-                        (),
-                        (),
-                        GlueText {
-                            text: &format!("{levels}  {}", map.zone),
-                            size: 12.0,
-                            color: Color::WHITE,
-                            wrap: false,
-                        },
-                        f,
-                        1.0,
-                    );
-                });
+                    TextColor(SUMMARY),
+                    TextShadow {
+                        offset: Vec2::splat(1.0),
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.85),
+                    },
+                    Node {
+                        width: px(ROW_W),
+                        margin: UiRect::top(px(4.0)),
+                        display: Display::None,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            });
+    });
+}
+
+/// One zone's row: its name, then its levels and continent.
+fn zone_row(
+    list: &mut ChildSpawnerCommands,
+    art: &GlueArt,
+    f: &Handle<Font>,
+    i: usize,
+    lo: u32,
+    hi: u32,
+) {
+    let px = Val::Px;
+    let map = &data::MAPS[i];
+    list.spawn((
+        MenuAction::Map(i),
+        Button,
+        LockHighlight::default(),
+        Node {
+            width: px(ROW_W),
+            height: px(ROW_H),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|b| {
+        if let Some(hi) = &art.select_highlight {
+            b.spawn((
+                Hilight,
+                Visibility::Hidden,
+                MaterialNode(hi.clone()),
+                abs(1.0, -20.0, -6.0, ROW_W + 20.0, ROW_H + 12.0),
+            ));
         }
+        outlined_text(
+            b,
+            abs(1.0, 0.0, 1.0, ROW_W, 16.0),
+            (),
+            (),
+            GlueText {
+                text: map.name,
+                size: 15.0,
+                color: GOLD,
+                wrap: false,
+            },
+            f,
+            1.0,
+        );
+        let levels = if lo == hi {
+            format!("Level {lo}")
+        } else {
+            format!("Level {lo}-{hi}")
+        };
+        outlined_text(
+            b,
+            abs(1.0, 0.0, 18.0, ROW_W, 15.0),
+            (),
+            (),
+            GlueText {
+                text: &format!("{levels}  {}", map.zone),
+                size: TEXT_FLOOR,
+                color: Color::WHITE,
+                wrap: false,
+            },
+            f,
+            1.0,
+        );
     });
 }
 

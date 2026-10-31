@@ -25,6 +25,16 @@ const BUTTON_HOT: Color = Color::srgba(0.36, 0.12, 0.06, 0.98);
 const DIM: Color = Color::srgb(0.6, 0.6, 0.6);
 pub(super) const DIM_GREY: Color = DIM;
 pub(super) const GOLD_TONE: Color = GOLD;
+/// The bottom band, in UI units (768 to the screen's height), that nothing interactive sits in:
+/// Android's gesture bar overlays it in immersive mode. A fixed margin: Bevy 0.18 / winit 0.30
+/// report no window insets, and NativeActivity's `content_rect` is the whole screen when
+/// immersive. 36 units is ~48 dp on the Galaxy Tab (2.4 px a unit, ~1.8 px a dp).
+pub(super) const SAFE_BOTTOM: f32 = 36.0;
+/// The XP bar's foot: over the gesture bar's handle (a line ~10 dp up), not the whole band; it
+/// takes no taps.
+const XP_BOTTOM: f32 = 12.0;
+/// The smallest secondary text, in UI units: 13 units is 18 px on a 1080-line screen.
+pub(super) const TEXT_FLOOR: f32 = 13.0;
 
 #[derive(Component)]
 pub(super) struct MenuRoot;
@@ -335,14 +345,15 @@ pub(super) fn setup_hud(
         ))
         .with_children(|root| {
             // `MainMenuExpBar`, 1024×13 at the bottom centre. The reference stacks it on the
-            // 40-unit action bar; with no action bar here it rests on the screen's edge.
+            // 40-unit action bar; with no action bar here it rests just over the gesture bar's
+            // handle ([`XP_BOTTOM`]).
             root.spawn((
                 XpBar,
                 Interaction::default(),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Percent(50.0),
-                    bottom: Val::Px(0.0),
+                    bottom: Val::Px(XP_BOTTOM),
                     margin: UiRect::left(Val::Px(-512.0)),
                     width: Val::Px(1024.0),
                     height: Val::Px(13.0),
@@ -427,7 +438,7 @@ pub(super) fn setup_hud(
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Percent(50.0),
-                    bottom: Val::Px(24.0),
+                    bottom: Val::Px(SAFE_BOTTOM + 4.0),
                     margin: UiRect::left(Val::Px(-MOBILITY_SIZE / 2.0)),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,

@@ -14,14 +14,15 @@
 //! `characters/<id>.toml` per character.
 //!
 //! **Progression:** the zones unlock in the list's order ([`menu::zone_order`], easiest first),
-//! each once the one before is completed on Normal; a locked zone shows only "???". On a zone,
-//! Heroic opens after Normal and Mythic after Heroic ([`Unlocks`]).
+//! each once the one before is completed on it; the locked zones leave the list for one line that
+//! counts them and names the zone to clear, never what is next. Heroic opens once every zone is
+//! completed on Normal, Mythic once every zone is on Heroic ([`Unlocks`]).
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::data::{self, Difficulty};
-use super::hud::HudFont;
+use super::hud::{HudFont, TEXT_FLOOR};
 use super::menu::{self, EnterSlot, MenuAction, TowerRoot};
 use super::{Phase, Rng, Run, Selection};
 use crate::char_select::race_name;
@@ -32,6 +33,8 @@ pub(super) const MAX_TALENT_POINTS: usize = 51;
 
 const GOLD: Color = Color::srgb(1.0, 0.82, 0.0);
 const DIM: Color = Color::srgb(0.55, 0.5, 0.42);
+/// A character row's talent count: lighter than [`DIM`] to read at the text floor.
+const TALENTS: Color = Color::srgb(0.8, 0.76, 0.66);
 const FILL: Color = Color::srgba(0.09, 0.09, 0.09, 0.88);
 const EDGE: Color = Color::srgba(0.8, 0.62, 0.25, 0.9);
 const BUTTON: Color = Color::srgba(0.16, 0.11, 0.04, 0.95);
@@ -39,6 +42,15 @@ const BUTTON_HOT: Color = Color::srgba(0.34, 0.22, 0.06, 0.95);
 /// An icon's inner 86%: the outer rows are its painted bevel.
 const ICON_CROP: [f32; 4] = [0.07, 0.93, 0.07, 0.93];
 const PICKED: Color = Color::srgba(0.45, 0.3, 0.05, 0.95);
+/// A zone row's completion mark, in UI units: the name line's height.
+const MARK: f32 = 18.0;
+/// A locked difficulty's label, and the line under it saying what opens it (WoW's red for a
+/// requirement not met, lifted to read on the dark button).
+const LOCKED_LABEL: Color = Color::srgb(0.72, 0.68, 0.6);
+const LOCKED_REASON: Color = Color::srgb(1.0, 0.38, 0.32);
+/// A difficulty button's size: two lines, the label and, while locked, why.
+const DIFFICULTY_W: f32 = 160.0;
+const DIFFICULTY_H: f32 = 50.0;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(super) struct Character {
@@ -134,6 +146,32 @@ impl Unlocks {
         self.open[d as usize].iter().any(|&o| o)
     }
 
+    /// The zone list's line under the open zones: how many are still locked on the difficulty
+    /// shown and what opens the next, never their names. `None` once every zone is open.
+    pub fn locked_summary(&self) -> Option<String> {
+        let d = self.current;
+        let order = menu::zone_order();
+        let locked = order.iter().filter(|&&(m, ..)| !self.zone_on(m, d)).count();
+        if locked == 0 {
+            return None;
+        }
+        let zones = if locked == 1 { "zone" } else { "zones" };
+        Some(
+            match order.iter().rev().find(|&&(m, ..)| self.zone_on(m, d)) {
+                Some(&(m, ..)) => format!(
+                    "{locked} more {zones} locked — clear {} on {} to unlock the next",
+                    data::MAPS[m].name,
+                    d.name()
+                ),
+                None => format!(
+                    "All {locked} {} {zones} locked — clear every zone on {} first",
+                    d.name(),
+                    previous(d).unwrap_or(Difficulty::Normal).name()
+                ),
+            },
+        )
+    }
+
     fn for_character(c: Option<&Character>, current: Difficulty) -> Self {
         let done = |m: usize, d: Difficulty| c.is_some_and(|c| c.completed(m, d));
         let order: Vec<usize> = menu::zone_order().into_iter().map(|(m, ..)| m).collect();
@@ -161,13 +199,18 @@ impl Unlocks {
     }
 }
 
-/// A locked zone row's cover: "???" over its name and marks.
-#[derive(Component)]
-struct LockCover(usize);
-
 /// The results screen's completion line, placed by `hud::setup_hud`.
 #[derive(Component)]
 pub(super) struct CompletionLine;
+
+/// The difficulty a pass through every zone on opens this one ([`Unlocks`]).
+fn previous(d: Difficulty) -> Option<Difficulty> {
+    match d {
+        Difficulty::Normal => None,
+        Difficulty::Heroic => Some(Difficulty::Normal),
+        Difficulty::Mythic => Some(Difficulty::Heroic),
+    }
+}
 
 #[derive(Component)]
 struct CharPanel;
@@ -188,6 +231,9 @@ struct CreateBar;
 struct NewName;
 #[derive(Component)]
 struct DeleteLabel;
+/// A locked difficulty button's second line: what opens it.
+#[derive(Component)]
+struct LockReason;
 #[derive(Component)]
 struct CountLabel;
 /// A zone row's mark for one difficulty: gold once completed.
@@ -398,7 +444,7 @@ pub(super) fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
 }
 
 /// The character list, filling the left column above Talents and Records. It clips rather than
-/// spills: eight characters at the text floor need about the column's height.
+/// spills: on the 768-unit canvas the rows get ~350 units, eight two-line rows ~350.
 fn spawn_list(col: &mut ChildSpawnerCommands, f: &Handle<Font>) {
     col.spawn((
         CharPanel,
@@ -409,8 +455,8 @@ fn spawn_list(col: &mut ChildSpawnerCommands, f: &Handle<Font>) {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            row_gap: Val::Px(6.0),
-            padding: UiRect::all(Val::Px(10.0)),
+            row_gap: Val::Px(4.0),
+            padding: UiRect::all(Val::Px(8.0)),
             border: UiRect::all(Val::Px(2.0)),
             border_radius: BorderRadius::all(Val::Px(6.0)),
             overflow: Overflow::clip_y(),
@@ -456,7 +502,7 @@ fn spawn_bars(commands: &mut Commands, f: &Handle<Font>) {
             DifficultyBar,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(136.0),
+                bottom: Val::Px(menu::DIFFICULTY_BOTTOM),
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 column_gap: Val::Px(8.0),
@@ -469,7 +515,28 @@ fn spawn_bars(commands: &mut Commands, f: &Handle<Font>) {
         .with_children(|bar| {
             for d in Difficulty::ALL {
                 let label = format!("{} · {} min", d.name(), d.run_secs() as u32 / 60);
-                spawn_button(bar, f, CharButton::Difficulty(d), &label, 150.0, ());
+                bar.spawn((
+                    Button,
+                    CharButton::Difficulty(d),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        ..button_node(DIFFICULTY_W, DIFFICULTY_H)
+                    },
+                    BackgroundColor(BUTTON),
+                    BorderColor::all(EDGE),
+                ))
+                .with_children(|b| {
+                    b.spawn(text(f, label, 16.0, Color::WHITE));
+                    // While locked: what opens it ([`refresh_labels`]).
+                    b.spawn((
+                        text(f, "", TEXT_FLOOR, LOCKED_REASON),
+                        LockReason,
+                        Node {
+                            display: Display::None,
+                            ..default()
+                        },
+                    ));
+                });
             }
         });
     // Creating: the name, a new one, Create and Back, where Enter World stands.
@@ -658,8 +725,8 @@ fn rebuild_rows(
                 Node {
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(1.0),
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                    flex_shrink: 0.0,
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
@@ -668,18 +735,30 @@ fn rebuild_rows(
                 BorderColor::all(if picked { EDGE } else { Color::NONE }),
             ))
             .with_children(|row| {
-                row.spawn(text(f, c.name.clone(), 16.0, GOLD));
+                // The name, its talent points at the line's end; the race and class under it.
+                row.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Baseline,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|line| {
+                    line.spawn(text(f, c.name.clone(), 16.0, GOLD));
+                    line.spawn(text(
+                        f,
+                        format!("{}/{} talents", c.talent_points(), MAX_TALENT_POINTS),
+                        TEXT_FLOOR,
+                        TALENTS,
+                    ));
+                });
                 row.spawn(text(
                     f,
                     format!("{} {}", race_name(c.race), class_name),
-                    12.0,
+                    14.0,
                     class_color,
-                ));
-                row.spawn(text(
-                    f,
-                    format!("Talent points {}/{}", c.talent_points(), MAX_TALENT_POINTS),
-                    11.0,
-                    DIM,
                 ));
             });
         }
@@ -726,13 +805,12 @@ fn show(
     }
 }
 
-/// Three marks on every zone row, N H M, gold where the active character completed it.
+/// Three marks on every zone row, N H M, lit where the active character completed it, beside the
+/// name (the line under it runs the row's width).
 fn mark_zones(
     mut commands: Commands,
     rows: Query<(Entity, &MenuAction), (With<Button>, Without<ZoneMarked>)>,
-    font: Option<Res<HudFont>>,
 ) {
-    let Some(font) = font else { return };
     for (e, action) in &rows {
         let MenuAction::Map(i) = *action else {
             continue;
@@ -741,9 +819,9 @@ fn mark_zones(
             row.spawn((
                 Node {
                     position_type: PositionType::Absolute,
-                    right: Val::Px(6.0),
-                    top: Val::Px(4.0),
-                    column_gap: Val::Px(4.0),
+                    right: Val::Px(2.0),
+                    top: Val::Px(0.0),
+                    column_gap: Val::Px(3.0),
                     ..default()
                 },
                 Pickable::IGNORE,
@@ -752,8 +830,8 @@ fn mark_zones(
                 for d in Difficulty::ALL {
                     marks.spawn((
                         Node {
-                            width: Val::Px(15.0),
-                            height: Val::Px(15.0),
+                            width: Val::Px(MARK),
+                            height: Val::Px(MARK),
                             ..default()
                         },
                         ImageNode {
@@ -765,27 +843,6 @@ fn mark_zones(
                         Pickable::IGNORE,
                     ));
                 }
-            });
-            // Over the name and the marks while the zone is locked: nothing of what is next.
-            row.spawn((
-                LockCover(i),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(-4.0),
-                    right: Val::Px(-4.0),
-                    top: Val::Px(-2.0),
-                    bottom: Val::Px(-2.0),
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::left(Val::Px(4.0)),
-                    display: Display::None,
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.07, 0.07, 0.07)),
-                Pickable::IGNORE,
-            ))
-            .with_children(|cover| {
-                cover.spawn(text(&font.0, "???", 15.0, DIM));
-                cover.spawn(text(&font.0, "Locked", 12.0, DIM));
             });
         });
     }
@@ -808,21 +865,52 @@ fn refresh_labels(
         &mut BorderColor,
         &Children,
     )>,
-    mut covers: Query<(&LockCover, &mut Node)>,
-    mut label_colors: Query<&mut TextColor, Without<ZoneMark>>,
+    mut zone_rows: Query<(&MenuAction, &mut Node), (With<Button>, Without<LockReason>)>,
+    mut summary: Query<
+        (&mut Text, &mut Node),
+        (
+            With<menu::ZoneSummary>,
+            Without<MenuAction>,
+            Without<LockReason>,
+            Without<DeleteLabel>,
+            Without<NewName>,
+            Without<CountLabel>,
+        ),
+    >,
+    mut reasons: Query<(&mut Node, &mut Text), (With<LockReason>, Without<MenuAction>)>,
+    mut label_colors: Query<&mut TextColor, (Without<ZoneMark>, Without<LockReason>)>,
     unlocks: Res<Unlocks>,
 ) {
     if !chars.is_changed() && !selection.is_changed() && !unlocks.is_changed() && fresh.is_empty() {
         return;
     }
-    for (cover, mut node) in &mut covers {
-        let display = if unlocks.zone(cover.0) {
-            Display::None
-        } else {
+    // A locked zone leaves the list; one line under the open ones counts them.
+    for (action, mut node) in &mut zone_rows {
+        let MenuAction::Map(i) = *action else {
+            continue;
+        };
+        let display = if unlocks.zone(i) {
             Display::Flex
+        } else {
+            Display::None
         };
         if node.display != display {
             node.display = display;
+        }
+    }
+    if let Ok((mut text, mut node)) = summary.single_mut() {
+        let line = unlocks.locked_summary();
+        let display = if line.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        let line = line.unwrap_or_default();
+        if text.0 != line {
+            text.0 = line;
         }
     }
     let active = chars.active();
@@ -860,15 +948,23 @@ fn refresh_labels(
         *border = BorderColor::all(match (on, open) {
             (true, _) => GOLD,
             (false, true) => EDGE,
-            (false, false) => DIM.with_alpha(0.4),
+            (false, false) => DIM,
         });
         for child in children.iter() {
             if let Ok(mut color) = label_colors.get_mut(child) {
-                color.0 = if open {
-                    Color::WHITE
-                } else {
-                    DIM.with_alpha(0.6)
-                };
+                color.0 = if open { Color::WHITE } else { LOCKED_LABEL };
+            }
+            if let Ok((mut node, mut text)) = reasons.get_mut(child) {
+                let display = if open { Display::None } else { Display::Flex };
+                if node.display != display {
+                    node.display = display;
+                }
+                let why = previous(d).map_or(String::new(), |p| {
+                    format!("Clear all {} zones", p.name())
+                });
+                if text.0 != why {
+                    text.0 = why;
+                }
             }
         }
     }
@@ -967,5 +1063,73 @@ fn record_completion(
     }
     for mut t in &mut lines {
         t.0 = line.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hero(completions: &[(usize, Difficulty)]) -> Character {
+        Character {
+            id: 1,
+            name: "Test".into(),
+            class_id: 1,
+            race: 1,
+            sex: 0,
+            completions: completions
+                .iter()
+                .map(|&(m, d)| (data::MAPS[m].name.to_string(), d.name().to_string()))
+                .collect(),
+            talents: Default::default(),
+        }
+    }
+
+    /// The zone list counts the locked zones and names the one to clear, not the next.
+    #[test]
+    fn the_locked_summary_names_the_zone_to_clear() {
+        let order: Vec<usize> = menu::zone_order().into_iter().map(|(m, ..)| m).collect();
+        let n = order.len();
+        let fresh = Unlocks::for_character(None, Difficulty::Normal);
+        assert_eq!(
+            fresh.locked_summary().unwrap(),
+            format!(
+                "{} more zones locked — clear {} on Normal to unlock the next",
+                n - 1,
+                data::MAPS[order[0]].name
+            )
+        );
+        let one = hero(&[(order[0], Difficulty::Normal)]);
+        let s = Unlocks::for_character(Some(&one), Difficulty::Normal)
+            .locked_summary()
+            .unwrap();
+        assert!(s.starts_with(&format!("{} more zones", n - 2)), "{s}");
+        assert!(s.contains(data::MAPS[order[1]].name), "{s}");
+        assert!(!s.contains(data::MAPS[order[2]].name), "{s}");
+    }
+
+    #[test]
+    fn the_locked_summary_goes_once_all_are_open() {
+        let order: Vec<usize> = menu::zone_order().into_iter().map(|(m, ..)| m).collect();
+        let all: Vec<_> = order.iter().map(|&m| (m, Difficulty::Normal)).collect();
+        let c = hero(&all);
+        assert_eq!(
+            Unlocks::for_character(Some(&c), Difficulty::Normal).locked_summary(),
+            None
+        );
+        let heroic = Unlocks::for_character(Some(&c), Difficulty::Heroic)
+            .locked_summary()
+            .unwrap();
+        assert!(heroic.ends_with("on Heroic to unlock the next"), "{heroic}");
+        let mythic = Unlocks::for_character(Some(&c), Difficulty::Mythic)
+            .locked_summary()
+            .unwrap();
+        assert_eq!(
+            mythic,
+            format!(
+                "All {} Mythic zones locked — clear every zone on Heroic first",
+                order.len()
+            )
+        );
     }
 }

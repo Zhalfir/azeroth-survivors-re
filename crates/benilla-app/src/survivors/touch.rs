@@ -25,6 +25,7 @@ use bevy::ui::{ComputedNode, UiGlobalTransform, UiScale};
 use bevy::window::{CursorMoved, PrimaryWindow, WindowEvent};
 
 use super::hero::{CamMode, CamRig};
+use super::hud::SAFE_BOTTOM;
 use super::Phase;
 
 /// How far, in logical pixels, the joystick's knob travels from where the thumb landed.
@@ -38,13 +39,19 @@ const STICK_AIM: f32 = 160.0;
 const BUTTON_SIZE: f32 = 60.0;
 /// The play buttons: the key each taps, its icon (`None`: the class's movement spell, filled
 /// once learned), and its centre's inset in UI units from the right edge and from the bottom
-/// (`true`) or top edge. Pause sits under the minimap, the rest by the right thumb.
+/// (`true`) or top edge. Pause sits under the minimap, the rest by the right thumb, their feet
+/// over the gesture-bar band ([`SAFE_BOTTOM`]).
 const BUTTONS: [(KeyCode, Option<&str>, Vec2, bool); 3] = [
-    (super::mobility::KEY, None, Vec2::new(70.0, 130.0), true),
+    (
+        super::mobility::KEY,
+        None,
+        Vec2::new(70.0, SAFE_BOTTOM + 108.0),
+        true,
+    ),
     (
         KeyCode::KeyC,
         Some("Interface\\Icons\\Ability_Hunter_EagleEye"),
-        Vec2::new(165.0, 60.0),
+        Vec2::new(165.0, SAFE_BOTTOM + 38.0),
         true,
     ),
     (
