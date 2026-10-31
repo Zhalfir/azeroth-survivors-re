@@ -773,6 +773,7 @@ pub(super) fn apply_hits(
         if dmg > 0.0 {
             en.hp -= dmg;
             run.record(h.source, dmg);
+            run.leech(dmg);
             super::combatlog::dealt(h.source, dmg, h.crit);
             fx.number(e, dmg, h.crit, h.color);
             if let Effect::Drain(frac) = h.effect {
@@ -837,6 +838,7 @@ pub(super) fn apply_hits(
         en.dots.retain(|d| d.left > 0.0);
         if dealt > 0.0 {
             en.hp -= dealt;
+            run.leech(dealt);
             fx.number(e, dealt, false, COLOR_SPELL);
             if en.hp <= 0.0 {
                 kill(&mut commands, &mut run, e, tf.translation, &mut en);

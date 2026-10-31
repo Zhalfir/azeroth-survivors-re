@@ -198,6 +198,7 @@ pub(crate) struct Bonus {
     pub growth: f32,
     pub armor: f32,
     pub crit: f32,
+    pub lifesteal: f32,
 }
 
 impl Bonus {
@@ -213,6 +214,7 @@ impl Bonus {
             Stat::Growth => self.growth += v,
             Stat::Armor => self.armor += v,
             Stat::Crit => self.crit += v,
+            Stat::Lifesteal => self.lifesteal += v,
         }
     }
 

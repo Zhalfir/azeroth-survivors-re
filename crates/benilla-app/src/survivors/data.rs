@@ -906,6 +906,8 @@ pub(crate) enum Stat {
     Growth,
     Armor,
     Crit,
+    /// A share of the damage dealt returned as health (capped per second, `Run::leech`).
+    Lifesteal,
 }
 
 pub(crate) struct PassiveDef {
@@ -938,6 +940,16 @@ pub(crate) static PASSIVES: &[PassiveDef] = &[
         spell: 13159,
         stat: Stat::Speed,
         per_level: 0.10,
+    },
+    // The 1.12 weapon enchant's name; Siphon Life's icon (18265), the client's drain-life art.
+    // Added after a Normal Warrior run with no healing besides regeneration died to the final
+    // boss's adds (tablet, 2026-10-31).
+    PassiveDef {
+        key: "lifesteal",
+        name: "Lifestealing",
+        spell: 18265,
+        stat: Stat::Lifesteal,
+        per_level: 0.03,
     },
     PassiveDef {
         key: "renew",

@@ -298,6 +298,15 @@ pub(super) struct Stats {
     pub growth: f32,
     pub armor: f32,
     pub crit: f32,
+    pub lifesteal: f32,
+}
+
+/// The most Lifestealing heals per second of run time, as a share of the maximum health.
+pub(super) const LEECH_CAP: f32 = 0.04;
+
+/// The heal one hit's `dealt` buys at `lifesteal`, within what is left of the second's budget.
+pub(super) fn leech_amount(dealt: f32, lifesteal: f32, max_hp: f32, used: f32) -> f32 {
+    (dealt * lifesteal).min((max_hp * LEECH_CAP - used).max(0.0))
 }
 
 pub(super) const BASE_HP: f32 = 120.0;
@@ -334,6 +343,9 @@ pub(super) struct Run {
     pub immune_t: f32,
     /// Run time of the last blow that reached the hero, for out-of-combat regeneration.
     pub last_hurt: f32,
+    /// Lifestealing's per-second budget: the run second it is for, and what it has healed.
+    pub leech_second: f32,
+    pub leech_used: f32,
     pub thorns: f32,
     pub thorns_t: f32,
     pub thorns_spell: u32,
@@ -375,6 +387,8 @@ impl Default for Run {
             shield_t: 0.0,
             immune_t: 0.0,
             last_hurt: 0.0,
+            leech_second: -1.0,
+            leech_used: 0.0,
             thorns: 0.0,
             thorns_t: 0.0,
             thorns_spell: 0,
@@ -424,6 +438,7 @@ impl Run {
             growth: 1.0,
             armor: 0.0,
             crit: 0.05,
+            lifesteal: 0.0,
         };
         // Tanky classes start tougher, cloth starts quicker.
         match self.class.id {
@@ -444,6 +459,7 @@ impl Run {
                 Stat::Growth => s.growth += v,
                 Stat::Armor => s.armor += v,
                 Stat::Crit => s.crit += v,
+                Stat::Lifesteal => s.lifesteal += v,
             }
         }
         // The character's talents and tier set, after the run's own passives.
@@ -458,7 +474,25 @@ impl Run {
         s.growth += b.growth;
         s.armor += b.armor;
         s.crit += b.crit;
+        s.lifesteal += b.lifesteal;
         s
+    }
+
+    /// Heal a share of `dealt` by the Lifestealing stat, at most [`LEECH_CAP`] of the pool per
+    /// second of run time, so a big crowd can't make the hero immortal.
+    pub fn leech(&mut self, dealt: f32) {
+        let s = self.stats();
+        if s.lifesteal <= 0.0 || dealt <= 0.0 || self.dead_t.is_some() {
+            return;
+        }
+        let second = self.elapsed.floor();
+        if second != self.leech_second {
+            self.leech_second = second;
+            self.leech_used = 0.0;
+        }
+        let heal = leech_amount(dealt, s.lifesteal, s.max_hp, self.leech_used);
+        self.leech_used += heal;
+        self.hp = (self.hp + heal).min(s.max_hp);
     }
 
     pub fn guid(&mut self) -> u64 {
@@ -541,4 +575,19 @@ fn reset_run(
     *spawner = enemies::Spawner::default();
     // The preview hero is respawned for the look still picked.
     selection.version += 1;
+}
+
+#[cfg(test)]
+mod leech_tests {
+    use super::leech_amount;
+
+    #[test]
+    fn lifestealing_heals_a_share_within_the_second_budget() {
+        // 15 % of a 100-damage hit is 15; a 400 pool allows 16 a second.
+        assert_eq!(leech_amount(100.0, 0.15, 400.0, 0.0), 15.0);
+        // 10 of the second's 16 already used: only 6 left.
+        assert_eq!(leech_amount(100.0, 0.15, 400.0, 10.0), 6.0);
+        // Budget spent: nothing, never negative.
+        assert_eq!(leech_amount(100.0, 0.15, 400.0, 20.0), 0.0);
+    }
 }

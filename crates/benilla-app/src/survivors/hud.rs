@@ -2158,6 +2158,7 @@ fn stat_label(stat: Stat) -> &'static str {
         Stat::Growth => "Experience gained",
         Stat::Armor => "Damage blocked per hit",
         Stat::Crit => "Critical strike chance",
+        Stat::Lifesteal => "Damage returned as health",
     }
 }
 
@@ -2176,6 +2177,10 @@ fn passive_text(stat: Stat, v: f32) -> String {
             "Increases your chance to critically strike for double damage by {}.",
             pct(v)
         ),
+        Stat::Lifesteal => format!(
+            "Heals you for {} of the damage you deal, up to 4% of your maximum health each second.",
+            pct(v)
+        ),
     }
 }
 
@@ -2192,6 +2197,7 @@ fn stat_total(stat: Stat, s: &Stats) -> String {
         Stat::Growth => format!("Experience gained: {}", pct(s.growth)),
         Stat::Armor => format!("Damage blocked per hit: {}", num(s.armor)),
         Stat::Crit => format!("Critical strike chance: {}", pct(s.crit)),
+        Stat::Lifesteal => format!("Damage returned as health: {}", pct(s.lifesteal)),
     }
 }
 

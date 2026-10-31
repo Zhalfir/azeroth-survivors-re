@@ -281,6 +281,7 @@ fn card_value(choice: &hud::Choice, run: &Run) -> f32 {
         data::Stat::Growth => 1.2,
         data::Stat::Speed => 1.0,
         data::Stat::Magnet => 0.9,
+        data::Stat::Lifesteal => 1.7,
     };
     match *choice {
         hud::Choice::NewAbility(_) if run.abilities.len() < 4 => 3.0,
