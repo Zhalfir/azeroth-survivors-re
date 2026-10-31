@@ -262,6 +262,11 @@ impl Marks {
     }
 
     /// Write the slots into the unit's aura arrays and ring the watch, if they changed.
+    /// Whether [`Self::flush`] has anything to write.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
     pub fn flush(
         &mut self,
         entity: Entity,

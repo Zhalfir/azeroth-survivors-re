@@ -455,13 +455,21 @@ pub(super) fn move_enemies(
             }
             if dir != Vec3::ZERO {
                 let target = Quat::from_rotation_y(yaw_toward(dir));
-                tf.rotation = tf.rotation.slerp(target, (dt * 10.0).min(1.0));
+                let turned = tf.rotation.slerp(target, (dt * 10.0).min(1.0));
+                // Only a real turn is written: a write marks `Transform` changed, and every
+                // enemy's transform, rig and shadow work downstream follows the flag.
+                if turned.angle_between(tf.rotation) > 1e-4 {
+                    tf.rotation = turned;
+                }
             }
         }
         let shove = push.get(&ent).copied().unwrap_or_default();
-        let mut next = pos + step * dt + shove * (dt * 8.0).min(0.5);
-        next = ground(&world, next, pos.y);
-        tf.translation = next;
+        let delta = step * dt + shove * (dt * 8.0).min(0.5);
+        // A standing enemy (in contact, held, or idle) keeps its transform untouched and skips the
+        // terrain lookup (B3c hotspot survey, 2026-10-31).
+        if delta.length_squared() > 1e-8 {
+            tf.translation = ground(&world, pos + delta, pos.y);
+        }
         if speed > 0.0 {
             mv.speed = speed;
             mv.flags = move_flags::FORWARD;
@@ -511,7 +519,12 @@ pub(super) fn tick_marks(
     let dt = time.delta_secs();
     for (entity, guid, mut store, mut marks) in &mut units {
         marks.tick(dt);
-        marks.flush(entity, guid.0, &mut store, &mut fields);
+        // Borrowing the store mutably marks it changed even when nothing is written, which kept
+        // every enemy's `ObjectStore` changed every frame and the unit feed's dirty gate
+        // (`ui_unit::feed_units`) open (B3c hotspot survey, 2026-10-31).
+        if marks.is_dirty() {
+            marks.flush(entity, guid.0, &mut store, &mut fields);
+        }
     }
 }
 
