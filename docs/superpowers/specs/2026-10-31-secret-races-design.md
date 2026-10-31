@@ -43,13 +43,13 @@ Give the survivors mode Vampire Survivors-style secrets: hidden playable races y
 | Gnoll | Warrior, Hunter | creature | kill 5,000 gnolls | "The Riverpaw count their dead in thousands." |
 | Kobold | Warrior, Rogue | creature | open 100 chests | "You no take candle… but you take everything else." |
 | Ogre | Warrior, Mage | creature | win a Heroic run as a Warrior | "Heroes are small. Make them smaller — with an axe." |
-| Satyr | Rogue, Warlock | creature | clear Ashenvale/Felwood on Heroic | "Where the forest burns green, the corrupted wait for a hero." |
+| Satyr | Rogue, Warlock | creature | clear Teldrassil and Mount Hyjal on Heroic | "Where the forest burns green, the corrupted wait for a hero." |
 | Furbolg | Warrior, Druid, Shaman | creature | win a Druid run never below 50 % health | "The wild spirit walks unharmed through the storm." |
 | Dragonspawn | Warrior, Mage | creature | clear Mythic | "Only those who conquer the hardest trials earn the flight's respect." |
-| Quillboar | Warrior, Hunter, Shaman | creature | clear the Razorfen-area zones | "The thorns remember who walked the Razorfen." |
+| Quillboar | Warrior, Hunter, Shaman | creature | clear The Barrens and Durotar | "The thorns remember who walked the Razorfen." |
 | Felguard | Warrior, Warlock | creature | win a Mythic run as a Warlock | "Command the Legion at its hardest, and it will kneel." |
-| Centaur | Warrior, Hunter | creature | survive 20 minutes in Desolace (Endless) | "The Kolkar respect only those who never stop running." |
-| Imp | Warlock, Mage | creature | win a run in under 8 minutes | "Faster, master, faster! Eight minutes is too long!" |
+| Centaur | Warrior, Hunter | creature | win a run in The Barrens without ever standing still more than 3 seconds | "The Kolkar respect only those who never stop running." |
+| Imp | Warlock, Mage | creature | kill the final boss within 60 seconds of its arrival | "Faster, master, faster! Eight minutes is too long!" |
 
 Paladin stays limited to Human and Dwarf, plus the Skeleton as the one dark exception (user's choice: "Skeleton paladin is cool"). Creatures without cast animations play the attack swing for spells.
 
