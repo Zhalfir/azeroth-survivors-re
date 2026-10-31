@@ -477,7 +477,7 @@ fn spawn_list(col: &mut ChildSpawnerCommands, f: &Handle<Font>) {
                 flex_basis: Val::Px(0.0),
                 min_height: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
+                row_gap: Val::Px(2.0),
                 overflow: Overflow::clip_y(),
                 ..default()
             },
@@ -726,7 +726,9 @@ fn rebuild_rows(
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
                     flex_shrink: 0.0,
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                    // Tight enough that the eighth (last allowed) character's row fits the list
+                    // at the A11 text sizes (review, 2026-10-31).
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
