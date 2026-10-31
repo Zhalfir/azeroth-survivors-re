@@ -30,6 +30,7 @@ pub(super) struct FrameSamples {
 
 impl FrameSamples {
     /// When this frame began (`First`), for the frame-rate cap to measure what is left.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) fn frame_started(&self) -> Option<Instant> {
         self.started
     }

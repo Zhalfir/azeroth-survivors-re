@@ -47,13 +47,19 @@ impl FrameCap {
         }
     }
 
-    /// The frame time the cap aims for; `None` when uncapped.
+    /// The frame time the cap aims for, 97% of the nominal period; `None` when uncapped. Exactly
+    /// 1/60 s is exactly two refreshes of a 120 Hz panel (30: four), a knife edge: a late wake or
+    /// a 119.9 Hz panel puts the frame past the second vblank and Fifo waits for a third, an
+    /// occasional 25 ms frame. Aiming a little under keeps the frame inside its refreshes; vsync
+    /// owns the exact beat and the cap only stops the game from running ahead of it.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) fn target(self) -> Option<Duration> {
-        match self {
-            Self::Thirty => Some(Duration::from_secs_f64(1.0 / 30.0)),
-            Self::Sixty => Some(Duration::from_secs_f64(1.0 / 60.0)),
-            Self::Uncapped => None,
-        }
+        let nominal = match self {
+            Self::Thirty => 1.0 / 30.0,
+            Self::Sixty => 1.0 / 60.0,
+            Self::Uncapped => return None,
+        };
+        Some(Duration::from_secs_f64(nominal * 0.97))
     }
 
     fn parse(s: &str) -> Self {
@@ -90,6 +96,7 @@ impl FrameCap {
 
 /// How long to sleep after `spent` of work and waiting to make the frame `target` long, or `None`
 /// when the frame already ran over it. Uncapped has no target and never reaches this.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(super) fn sleep_for(target: Duration, spent: Duration) -> Option<Duration> {
     target.checked_sub(spent).filter(|d| !d.is_zero())
 }
@@ -137,13 +144,13 @@ mod tests {
         let target = FrameCap::Sixty.target().unwrap();
         let rest = super::sleep_for(target, ms(10.0)).unwrap();
         assert!(
-            (rest.as_secs_f64() * 1000.0 - 6.667).abs() < 0.01,
+            (rest.as_secs_f64() * 1000.0 - 6.167).abs() < 0.01,
             "{rest:?}"
         );
         assert_eq!(super::sleep_for(target, ms(20.0)), None);
         assert_eq!(super::sleep_for(target, target), None);
         let thirty = super::sleep_for(FrameCap::Thirty.target().unwrap(), ms(10.0)).unwrap();
-        assert!((thirty.as_secs_f64() * 1000.0 - 23.333).abs() < 0.01);
+        assert!((thirty.as_secs_f64() * 1000.0 - 22.333).abs() < 0.01);
     }
 
     #[test]
