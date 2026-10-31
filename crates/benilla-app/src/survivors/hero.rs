@@ -144,6 +144,34 @@ pub(super) fn spawn_hero(
     e
 }
 
+/// Hear from the hero, as the client's `SoundListenerAtCharacter` (default on) hears from the
+/// character. The sound plugin seats the listener on the `Embodied` body and otherwise falls back
+/// to the camera; the hero has none, so every 3D sound was rolled off from the camera, ~34 yd up
+/// at the default zoom: the hero's own `BowRelease` (vol 0.69, min 8 yd) reached the mix at 0.049
+/// on the tablet, against music at 0.4 and ambience at 0.6. Zoomed out past a kit's 45 yd cutoff,
+/// combat around the hero was not even allocated. Runs between the plugin's seat
+/// (`WorldStage::Stream`) and every sound consumer (`WorldStage::Present`).
+///
+/// The position only: the camera's facing stays, so left and right are the screen's on a top-down
+/// view rather than the hero's, which turns with every shot.
+pub(super) fn seat_listener(
+    config: Res<crate::sound::SoundConfig>,
+    hero: Query<(&Transform, Option<&crate::player::CameraPivot>), With<Hero>>,
+    mut listener: ResMut<crate::sound::AudioListener>,
+    out: Option<NonSendMut<crate::sound::SoundOutput>>,
+) {
+    if !config.listener_at_character {
+        return;
+    }
+    let Ok((t, pivot)) = hero.single() else {
+        return; // no run: the camera's ear
+    };
+    listener.pos = t.translation + Vec3::Y * crate::player::head_height(pivot, t.scale.x);
+    if let Some(mixer) = out.and_then(|o| o.into_inner().mixer.as_mut()) {
+        mixer.set_listener(listener.pos, listener.rot);
+    }
+}
+
 /// Midday over the battleground, whatever the clock says.
 pub(super) const MINUTE_OF_DAY: u32 = 780;
 
@@ -620,6 +648,59 @@ pub(super) fn reach(hero: Vec3, other: Vec3) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hero is the character the player hears from: the sound plugin seats the listener on an
+    /// `Embodied` body and falls back to the camera, and the hero has none. Measured on the tablet,
+    /// the hero's own `BowRelease` (vol 0.69, min 8) reached the mix at 0.049, rolled off from the
+    /// camera ~34 yd away, against music at 0.4 and ambience at 0.6.
+    #[test]
+    fn the_listener_hears_from_the_hero_not_the_camera() {
+        let mut app = App::new();
+        app.insert_resource(crate::sound::SoundConfig::default());
+        // Where the fallback seats it: the camera, 30 yd back and up.
+        let cam_rot = Quat::from_rotation_x(-FIXED_PITCH);
+        app.insert_resource(crate::sound::AudioListener {
+            pos: Vec3::new(0.0, 25.0, 17.0),
+            rot: cam_rot,
+        });
+        let feet = Vec3::new(3.0, 1.0, -2.0);
+        app.world_mut().spawn((
+            Hero { vy: 0.0, air: 0.0 },
+            Transform::from_translation(feet).with_rotation(Quat::from_rotation_y(0.7)),
+        ));
+        app.add_systems(Update, seat_listener);
+        app.update();
+        let listener = app.world().resource::<crate::sound::AudioListener>();
+        let ear = feet + Vec3::Y * crate::player::head_height(None, 1.0);
+        assert!(
+            listener.pos.distance(ear) < 1e-4,
+            "listener at {:?}, the hero's ear at {ear:?}",
+            listener.pos
+        );
+        // The camera's facing stays: on a top-down view left and right are the screen's, not the
+        // hero's, which turns with every shot.
+        assert_eq!(listener.rot, cam_rot);
+    }
+
+    /// The `SoundListenerAtCharacter` CVar off keeps the camera's ear, as in the client.
+    #[test]
+    fn the_cvar_off_keeps_the_camera_listener() {
+        let mut app = App::new();
+        app.insert_resource(crate::sound::SoundConfig {
+            listener_at_character: false,
+            ..default()
+        });
+        let cam = Vec3::new(0.0, 25.0, 17.0);
+        app.insert_resource(crate::sound::AudioListener {
+            pos: cam,
+            rot: Quat::IDENTITY,
+        });
+        app.world_mut()
+            .spawn((Hero { vy: 0.0, air: 0.0 }, Transform::default()));
+        app.add_systems(Update, seat_listener);
+        app.update();
+        assert_eq!(app.world().resource::<crate::sound::AudioListener>().pos, cam);
+    }
 
     #[test]
     fn locking_keeps_the_view() {

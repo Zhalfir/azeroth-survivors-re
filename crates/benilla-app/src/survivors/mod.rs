@@ -87,6 +87,12 @@ impl Plugin for SurvivorsPlugin {
             .add_systems(Update, hero::daylight)
             .add_systems(
                 Update,
+                hero::seat_listener
+                    .after(WorldStage::Stream)
+                    .before(WorldStage::Present),
+            )
+            .add_systems(
+                Update,
                 (
                     hero::drop_stray_buttons,
                     hero::aim_cursor,
