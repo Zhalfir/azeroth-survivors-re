@@ -363,3 +363,13 @@ The user approves it, then a plan follows.
 - **P1: preload during the loading screen.** On the Mac run, 0.1-0.8 s hitches came the first time each new thing appeared: new skills' effects, a boss arriving, new enemy types, the win. Warm the zone roster's creature displays, its bosses, the class's spell visuals and sounds, and the GPU pipelines before the run starts. This helps the tablet too.
 - **Optional:** copy the WoW Data folder (5.5 GB) from the Passport drive to the Mac's internal SSD, and point the app's launcher at it.
 - **iOS:** deferred. It first needs ~30 GB free and Xcode; then a survivors-ios shell, and touch cfgs extended to iOS.
+- **M1: masteries after max** (user approved 2026-11-01). The Mac run maxed every ability and passive at level 75 (7:25), then had 70 levels of heal-only picks. Once the build is full, the level-up stack offers 3 stackable boosts, rarity-coloured:
+  - Might: +3/6/10% damage.
+  - Vitality: +4/8/12% max HP.
+  - Haste: +1.5/3/5% cooldowns, capped.
+  - Precision: +1/2/3% crit, capped.
+  - Reach: +2/4/6% area.
+  - Swiftness: +1.5/3% speed, capped.
+  - "Second wind": heal 50% now.
+  
+  Counts show beside the skills and are logged. Replaces the Heal-only fallback (`bank_maxed`).
