@@ -88,6 +88,8 @@ struct Foe {
     hp: f32,
     dist: f32,
     radius: f32,
+    /// A boss (the final boss included): single-target kinds hit it first when it is in range.
+    boss: bool,
 }
 
 /// The numbers one cast uses, from the ability's level and the hero's stats.
@@ -163,6 +165,33 @@ fn nearest(foes: &[Foe], range: f32, n: usize) -> Vec<Foe> {
         .collect()
 }
 
+/// The nearest living boss within `range` (plus its radius), if any. `foes` is nearest-first.
+fn boss_in_range(foes: &[Foe], range: f32) -> Option<Foe> {
+    foes.iter()
+        .find(|f| f.boss && f.dist <= range + f.radius)
+        .copied()
+}
+
+/// The targets of a single-target kind (Strike, Melee, Bolt) aimed at `n` foes: a boss in range
+/// takes the first slot, the rest stay nearest-first (or toughest-first for the heavy hitters),
+/// so a boss among its adds is not left for last (balance round 10).
+fn single_targets(foes: &[Foe], range: f32, n: usize, by_toughness: bool) -> Vec<Foe> {
+    let mut v = if by_toughness {
+        toughest(foes, range, n)
+    } else {
+        nearest(foes, range, n)
+    };
+    if n == 0 {
+        return v;
+    }
+    if let Some(boss) = boss_in_range(foes, range) {
+        v.retain(|f| f.e != boss.e);
+        v.insert(0, boss);
+        v.truncate(n);
+    }
+    v
+}
+
 fn toughest(foes: &[Foe], range: f32, n: usize) -> Vec<Foe> {
     let mut v: Vec<Foe> = foes
         .iter()
@@ -230,6 +259,7 @@ pub(super) fn cast_abilities(
             hp: en.hp,
             dist: hero::reach(hpos, tf.translation),
             radius: en.radius,
+            boss: en.boss,
         })
         .collect();
     foes.sort_by(|a, b| a.dist.total_cmp(&b.dist));
@@ -264,14 +294,11 @@ pub(super) fn cast_abilities(
                 } else {
                     def.range
                 };
-                let targets = if matches!(
+                let by_toughness = matches!(
                     def.key,
                     "pyroblast" | "aimed_shot" | "exorcism" | "starfire"
-                ) {
-                    toughest(&foes, reach, p.count)
-                } else {
-                    nearest(&foes, reach, p.count)
-                };
+                );
+                let targets = single_targets(&foes, reach, p.count, by_toughness);
                 if targets.is_empty() {
                     false
                 } else {
@@ -370,7 +397,7 @@ pub(super) fn cast_abilities(
                     }
                 }
             }
-            Kind::Chain => match nearest(&foes, def.range, 1).first().copied() {
+            Kind::Chain => match single_targets(&foes, def.range, 1, false).first().copied() {
                 None => false,
                 Some(first) => {
                     let mut chain = vec![first];
@@ -406,16 +433,20 @@ pub(super) fn cast_abilities(
                 }
             },
             Kind::Dot => {
+                // A boss in range takes the first slot; the rest are drawn from the nearest.
+                let boss = boss_in_range(&foes, def.range).filter(|_| p.count > 0);
                 let mut pool: Vec<Foe> = foes
                     .iter()
                     .filter(|f| f.dist <= def.range)
+                    .filter(|f| boss.is_none_or(|b| b.e != f.e))
                     .take(p.count * 3)
                     .copied()
                     .collect();
-                if pool.is_empty() {
+                if pool.is_empty() && boss.is_none() {
                     false
                 } else {
                     let mut targets = Vec::with_capacity(p.count);
+                    targets.extend(boss);
                     while targets.len() < p.count && !pool.is_empty() {
                         targets.push(pool.swap_remove(rng.index(pool.len())));
                     }
@@ -575,6 +606,7 @@ pub(super) fn tick_areas(
             hp: en.hp,
             dist: 0.0,
             radius: en.radius,
+            boss: en.boss,
         })
         .collect();
 
@@ -850,5 +882,61 @@ pub(super) fn apply_hits(
                 marks.flush(e, guid.0, &mut store, &mut fields);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn foe(i: u32, dist: f32, hp: f32, boss: bool) -> Foe {
+        Foe {
+            e: Entity::from_raw_u32(i).unwrap(),
+            pos: Vec3::new(dist, 0.0, 0.0),
+            hp,
+            dist,
+            radius: 0.5,
+            boss,
+        }
+    }
+
+    #[test]
+    fn single_target_prefers_boss_in_range() {
+        // Nearest-first, as cast_abilities sorts them: the boss is the fourth.
+        let foes = [
+            foe(1, 2.0, 50.0, false),
+            foe(2, 3.0, 50.0, false),
+            foe(3, 5.0, 50.0, false),
+            foe(4, 9.0, 800.0, true),
+        ];
+        let one = single_targets(&foes, 20.0, 1, false);
+        assert_eq!(entities(&one), vec![foes[3].e]);
+        // The other slots stay nearest-first.
+        let three = single_targets(&foes, 20.0, 3, false);
+        assert_eq!(entities(&three), vec![foes[3].e, foes[0].e, foes[1].e]);
+        // Already among the toughest: moved to the front, not doubled.
+        let tough = single_targets(&foes, 20.0, 2, true);
+        assert_eq!(entities(&tough), vec![foes[3].e, foes[0].e]);
+        assert_eq!(boss_in_range(&foes, 20.0).map(|f| f.e), Some(foes[3].e));
+    }
+
+    #[test]
+    fn falls_back_to_nearest_without_boss() {
+        let foes = [
+            foe(1, 2.0, 50.0, false),
+            foe(2, 3.0, 50.0, false),
+            foe(4, 30.0, 800.0, true),
+        ];
+        // The boss is out of range: nearest-first as before.
+        let two = single_targets(&foes, 20.0, 2, false);
+        assert_eq!(entities(&two), vec![foes[0].e, foes[1].e]);
+        assert!(boss_in_range(&foes, 20.0).is_none());
+        // No boss at all.
+        let plain = [foe(1, 2.0, 50.0, false), foe(2, 3.0, 50.0, false)];
+        assert_eq!(
+            entities(&single_targets(&plain, 20.0, 1, false)),
+            vec![plain[0].e]
+        );
+        assert!(single_targets(&plain, 1.0, 1, false).is_empty());
     }
 }

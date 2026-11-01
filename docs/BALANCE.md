@@ -240,3 +240,29 @@ stronger ones win after a four-to-five-minute final boss. Elwynn is the easiest 
 pass and the auto-player is a lower bound for a person, so two wins in three on Mythic's
 first zone is consistent with "an achievement" over the whole pass. Next: a mid-pass zone
 (Duskwood, Stranglethorn) on Heroic and Mythic, and several runs per class.
+
+## Round 10 — the person's Normal runs (Elwynn Forest)
+
+Four Normal runs by hand on the tablet, all deaths between 4:53 and 8:34. What the run files
+showed:
+- Damage taken per second tripled from minute 2 to minute 6 (the Paladin's 5/s to 14/s), while
+  the maximum health only grew from about 200 to 250 (2.5 a level).
+- Bosses died slowly: Mother Fang (805 health) took a Paladin 89 and 113 s at 250+ damage per
+  second overall. The single-target spells hit the nearest enemy, almost never the boss, and
+  over 90% of the damage taken came from its adds.
+- The run file had no block or dodge counts and no potion heal, so the guard and the potion
+  could not be weighed.
+
+Changes:
+- Health per level 2.5 → **6.0** (a level-30 hero has 174 more base health before Fortitude,
+  talents and tier multiply it; calm regeneration and the Lifestealing cap are shares of the pool,
+  so they grow with it).
+- Single-target kinds (Bolt, Strike, Melee, Dot, a Chain's first link) hit a living boss first
+  when it is in the spell's range, the final boss included; their other targets stay
+  nearest-first. Area kinds are unchanged.
+- The run file's `tick` carries `blocks`, `dodges`, `guard_prevented` (before armour), `potions`
+  and `potion_healed`; the potion's event reads "potion: healed N". `analyze.py` prints the
+  guard's prevented damage, the potions and their healing per run.
+
+Next: the same four classes by hand on Normal to see the 5-to-9-minute wall move, and the boss
+kill times.
