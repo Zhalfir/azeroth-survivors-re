@@ -17,7 +17,9 @@
 //!   frame time (`cpu_ms` mean, `cpu_ms_max`) and, with `WOW_GPU_MS=1`, the GPU's (`gpu_ms`, a
 //!   key that is absent without the meter), and per
 //!   spell its damage, hits, crits and casts; per enemy type the damage it dealt the hero (and
-//!   how many blows), its kills and its spawns;
+//!   how many blows), its kills and its spawns; the class guard's `blocks` and `dodges` and
+//!   the damage they turned (`guard_prevented`, before armour), and `potions` drunk with the
+//!   health they actually healed (`potion_healed`);
 //! - `end` — won or lost, the killing blow, the totals.
 //!
 //! Single hits are folded into the second's tick: late in a run they come by the thousand a
@@ -58,7 +60,28 @@ struct Tick {
     kills: Vec<(&'static str, u32)>,
     spawns: Vec<(&'static str, u32)>,
     xp: f32,
+    guard: GuardTick,
 }
+
+/// The second's guard and potion counts.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+struct GuardTick {
+    blocks: u32,
+    dodges: u32,
+    /// Damage the blocks and dodges turned, before armour.
+    prevented: f32,
+    potions: u32,
+    /// Health the potions actually restored (not past the maximum).
+    potion_healed: f32,
+}
+
+const GUARD_ZERO: GuardTick = GuardTick {
+    blocks: 0,
+    dodges: 0,
+    prevented: 0.0,
+    potions: 0,
+    potion_healed: 0.0,
+};
 
 static TICK: Mutex<Tick> = Mutex::new(Tick {
     spells: Vec::new(),
@@ -66,6 +89,7 @@ static TICK: Mutex<Tick> = Mutex::new(Tick {
     kills: Vec::new(),
     spawns: Vec::new(),
     xp: 0.0,
+    guard: GUARD_ZERO,
 });
 /// The run file's pending lines, and the file itself while a run is on.
 static RUN_LINES: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -129,6 +153,7 @@ pub(super) fn begin(
         t.kills.clear();
         t.spawns.clear();
         t.xp = 0.0;
+        t.guard = GUARD_ZERO;
     }
     let path = crate::local_state::home().map(|h| {
         let unix = web_time::SystemTime::now()
@@ -190,6 +215,31 @@ pub(super) fn xp(amount: f32) {
     if let Ok(mut t) = TICK.lock() {
         t.xp += amount;
     }
+}
+
+/// The class guard turned a blow: `prevented` is what it kept off, before armour.
+pub(super) fn guarded(g: super::guard::Guarded, prevented: f32) {
+    if let Ok(mut t) = TICK.lock() {
+        match g {
+            super::guard::Guarded::Block => t.guard.blocks += 1,
+            super::guard::Guarded::Dodge => t.guard.dodges += 1,
+        }
+        t.guard.prevented += prevented.max(0.0);
+    }
+}
+
+/// A potion was drunk, healing `healed` (what it actually restored, not past the maximum):
+/// counted in the second's tick and written as an event line carrying the amount.
+pub(super) fn potion(elapsed: f32, healed: f32) {
+    if let Ok(mut t) = TICK.lock() {
+        t.guard.potions += 1;
+        t.guard.potion_healed += healed.max(0.0);
+    }
+    event(elapsed, potion_msg(healed));
+}
+
+fn potion_msg(healed: f32) -> String {
+    format!("potion: healed {:.0}", healed.max(0.0))
 }
 
 /// One line, stamped with the run's clock.
@@ -394,12 +444,14 @@ fn tick(
         kills: counts(&t.kills),
         spawns: counts(&t.spawns),
         split,
+        guard: t.guard,
     });
     t.spells.clear();
     t.taken.clear();
     t.kills.clear();
     t.spawns.clear();
     t.xp = 0.0;
+    t.guard = GUARD_ZERO;
     drop(t);
     run_line(line);
 }
@@ -420,10 +472,12 @@ struct TickLine {
     kills: String,
     spawns: String,
     split: super::frametime::FrameSplit,
+    guard: GuardTick,
 }
 
 /// The `tick` line as JSON. The CPU fields are appended after the original ones so older readers
-/// of the file keep working; `gpu_ms` is left out, not zeroed, when there is no GPU reading.
+/// of the file keep working; `gpu_ms` is left out, not zeroed, when there is no GPU reading. The
+/// guard and potion counts follow the CPU fields, always present (zero when nothing happened).
 fn tick_line(l: &TickLine) -> String {
     let gpu = l
         .split
@@ -431,7 +485,7 @@ fn tick_line(l: &TickLine) -> String {
         .map(|g| format!(",\"gpu_ms\":{g:.1}"))
         .unwrap_or_default();
     format!(
-        "{{\"t\":{:.0},\"type\":\"tick\",\"hp\":{:.0},\"max_hp\":{:.0},\"level\":{},\"xp_gained\":{:.1},\"kills_total\":{},\"alive\":{},\"fps\":{:.0},\"max_frame_ms\":{:.0},\"spells\":{{{}}},\"taken\":{{{}}},\"kills\":{{{}}},\"spawns\":{{{}}},\"cpu_ms\":{:.1},\"cpu_ms_max\":{:.1}{gpu}}}",
+        "{{\"t\":{:.0},\"type\":\"tick\",\"hp\":{:.0},\"max_hp\":{:.0},\"level\":{},\"xp_gained\":{:.1},\"kills_total\":{},\"alive\":{},\"fps\":{:.0},\"max_frame_ms\":{:.0},\"spells\":{{{}}},\"taken\":{{{}}},\"kills\":{{{}}},\"spawns\":{{{}}},\"cpu_ms\":{:.1},\"cpu_ms_max\":{:.1},\"blocks\":{},\"dodges\":{},\"guard_prevented\":{:.0},\"potions\":{},\"potion_healed\":{:.0}{gpu}}}",
         l.elapsed,
         l.hp,
         l.max_hp,
@@ -447,6 +501,11 @@ fn tick_line(l: &TickLine) -> String {
         l.spawns,
         l.split.cpu_ms_mean,
         l.split.cpu_ms_max,
+        l.guard.blocks,
+        l.guard.dodges,
+        l.guard.prevented,
+        l.guard.potions,
+        l.guard.potion_healed,
     )
 }
 
@@ -605,6 +664,13 @@ mod tests {
                 cpu_ms_max: 20.0,
                 gpu_ms_mean,
             },
+            guard: GuardTick {
+                blocks: 2,
+                dodges: 1,
+                prevented: 40.4,
+                potions: 1,
+                potion_healed: 61.6,
+            },
         })
     }
 
@@ -616,6 +682,17 @@ mod tests {
         assert_eq!(v["cpu_ms"], 10.0);
         assert_eq!(v["cpu_ms_max"], 20.0);
         assert!(v.get("gpu_ms").is_none());
+        assert_eq!(v["blocks"], 2);
+        assert_eq!(v["dodges"], 1);
+        assert_eq!(v["guard_prevented"], 40);
+        assert_eq!(v["potions"], 1);
+        assert_eq!(v["potion_healed"], 62);
+    }
+
+    #[test]
+    fn potion_event_carries_heal() {
+        assert_eq!(potion_msg(61.6), "potion: healed 62");
+        assert_eq!(potion_msg(-1.0), "potion: healed 0");
     }
 
     #[test]

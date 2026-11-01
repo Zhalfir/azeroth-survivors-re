@@ -508,11 +508,15 @@ pub(super) fn move_enemies(
             // A swing is a direct blow: the class's guard may turn it. Not while the hero is
             // immune anyway, so no "Block" floats over a blow that would not land.
             let open = run.immune_t <= 0.0 && !hero::god_mode();
+            let swung = raw;
             let (raw, guarded) = if open {
                 guard::mitigate(run.class.guard, guard::Hit::Direct, raw, rng.f32())
             } else {
                 (raw, None)
             };
+            if let Some(g) = guarded {
+                super::combatlog::guarded(g, swung - raw);
+            }
             let taken = match guarded {
                 Some(guard::Guarded::Dodge) => 0.0,
                 _ => hero::hurt_hero(&mut run, raw),

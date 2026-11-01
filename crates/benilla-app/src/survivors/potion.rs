@@ -72,7 +72,7 @@ pub(super) fn drink_potion(
     if healed >= 0.5 {
         fx.heal_text(me, healed);
     }
-    super::combatlog::event(run.elapsed, "potion");
+    super::combatlog::potion(run.elapsed, healed);
 }
 
 #[cfg(test)]
