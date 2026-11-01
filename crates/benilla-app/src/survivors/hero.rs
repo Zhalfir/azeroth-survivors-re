@@ -107,6 +107,13 @@ pub(super) struct MoveCarry {
     left: f32,
 }
 
+impl MoveCarry {
+    /// The manual heading on the last playing frame (zero standing), for the Charge.
+    pub(super) fn heading(&self) -> Vec3 {
+        self.last
+    }
+}
+
 /// Full speed until the last [`CARRY_EASE`] seconds, then a linear ease to a stop.
 fn carry_ease(left: f32) -> f32 {
     (left / CARRY_EASE).clamp(0.0, 1.0)
@@ -286,6 +293,21 @@ pub(super) fn drive_hero(
     mut hero: Query<(&mut Transform, &mut MovementState, &mut Hero)>,
 ) {
     let focus = match hero.single_mut() {
+        // A Charge carries the hero (`mobility::cast_mobility` places him): hold the Sprint gait
+        // for the whole lunge, so the run animation never cuts in mid-charge, and take no input.
+        Ok((tf, mut mv, mut hm)) if run.lunge_speed().is_some() => {
+            let speed = run.lunge_speed().unwrap_or_default();
+            if mv.speed != speed || mv.flags != move_flags::FORWARD || mv.vertical_speed != 0.0 {
+                mv.speed = speed;
+                mv.flags = move_flags::FORWARD;
+                mv.vertical_speed = 0.0;
+            }
+            if hm.vy != 0.0 || hm.air != 0.0 {
+                hm.vy = 0.0;
+                hm.air = 0.0;
+            }
+            tf.translation
+        }
         Ok((mut tf, mut mv, mut hm)) => {
             let dt = time.delta_secs();
             let mut dir = Vec3::ZERO;

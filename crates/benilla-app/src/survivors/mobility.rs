@@ -16,7 +16,9 @@ pub(super) const KEY: KeyCode = KeyCode::KeyF;
 pub(super) enum Move {
     /// Jump this many yards along the way the hero faces.
     Blink(f32),
-    /// Rush at the nearest enemy within this many yards, stunning it; else lunge that far.
+    /// Lunge this many yards along the way the hero moves (or faces, standing) in
+    /// [`LUNGE_SECS`]; the first enemy on the path stops it, and everything near is stunned and
+    /// knocked back ([`charge_path`]).
     Charge(f32),
     /// Run faster by this factor for `secs`.
     Haste(f32),
@@ -49,7 +51,8 @@ static MOBILITY: &[(u8, Mobility)] = &[
             kind: Move::Charge(25.0),
             cooldown: 8.0,
             secs: 1.5,
-            desc: "Charge the nearest enemy within 25 yards, stunning it.",
+            desc: "Charge up to 25 yards the way you are running. The first enemy in your path \
+                   stops you: every enemy within 4 yards is stunned for 1.5 sec and knocked back.",
         },
     ),
     (
@@ -142,13 +145,65 @@ static MOBILITY: &[(u8, Mobility)] = &[
     ),
 ];
 
-/// The mobility's run state, on [`Run`]: cooldown left, and the haste or vanish still running.
+/// The mobility's run state, on [`Run`]: cooldown left, and the haste, vanish or charge still
+/// running.
 #[derive(Default, Clone, Copy)]
 pub(super) struct MobilityState {
     pub cd: f32,
     pub haste: f32,
     pub haste_t: f32,
     pub vanish_t: f32,
+    pub lunge: Option<Lunge>,
+}
+
+/// A Charge under way: from, to, the seconds into it, and whether an enemy stops it at `to`.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Lunge {
+    from: Vec3,
+    to: Vec3,
+    t: f32,
+    hit: bool,
+}
+
+/// A Charge's travel time, whatever its length: as quick as a Blink to the eye.
+pub(super) const LUNGE_SECS: f32 = 0.25;
+/// An enemy this close to the charge's line stops it, this far short of it.
+const CHARGE_REACH: f32 = 1.5;
+/// At the stop, enemies within this are stunned for the spell's `secs` and knocked back.
+const CHARGE_STUN_RADIUS: f32 = 4.0;
+const CHARGE_KNOCKBACK: f32 = 3.0;
+/// The run speed the animation is told during the lunge: past `FAST_RUN_SPEED` (11), so the
+/// Sprint gait plays, without the rate scaling a 100 yd/s figure would bring.
+const LUNGE_ANIM_SPEED: f32 = 14.0;
+
+/// Where a charge from `from` along `dir`, `len` yards long, ends on the ground plane (x, z):
+/// short of the first enemy within [`CHARGE_REACH`] of its line, with that enemy's index, or at
+/// full length with none.
+pub(super) fn charge_path(
+    from: Vec2,
+    dir: Vec2,
+    len: f32,
+    enemies: &[Vec2],
+) -> (Vec2, Option<usize>) {
+    let dir = dir.normalize_or(Vec2::NEG_Y);
+    let mut first: Option<(f32, usize)> = None;
+    for (i, &e) in enemies.iter().enumerate() {
+        let rel = e - from;
+        let along = rel.dot(dir);
+        if !(0.0..=len + CHARGE_REACH).contains(&along) {
+            continue;
+        }
+        if (rel - dir * along).length() > CHARGE_REACH {
+            continue;
+        }
+        if first.is_none_or(|(a, _)| along < a) {
+            first = Some((along, i));
+        }
+    }
+    match first {
+        Some((along, i)) => (from + dir * (along - CHARGE_REACH).clamp(0.0, len), Some(i)),
+        None => (from + dir * len, None),
+    }
 }
 
 impl Run {
@@ -157,6 +212,13 @@ impl Run {
         (self.level >= LEARN_LEVEL)
             .then(|| for_class(self.class.id))
             .flatten()
+    }
+
+    /// While a Charge carries the hero: the speed the animation is told, so the Sprint gait plays
+    /// for the whole lunge ([`super::hero::drive_hero`] holds it and leaves the hero's place to
+    /// [`cast_mobility`]).
+    pub(super) fn lunge_speed(&self) -> Option<f32> {
+        self.mobile.lunge.map(|_| LUNGE_ANIM_SPEED)
     }
 
     /// The run speed's multiplier from a haste still running.
@@ -178,9 +240,11 @@ pub(super) fn cast_mobility(
     mut run: ResMut<Run>,
     world: WorldPoint,
     mut hero: Query<(Entity, &mut Transform), With<Hero>>,
-    mut enemies: Query<(Entity, &Transform, &mut Enemy), Without<Hero>>,
+    mut enemies: Query<(Entity, &mut Transform, &mut Enemy), Without<Hero>>,
     selection: Res<super::Selection>,
     aim: Res<hero::AimPoint>,
+    carry: Res<hero::MoveCarry>,
+    auto: Option<Res<super::auto::Auto>>,
     mut fx: Fx,
 ) {
     let dt = time.delta_secs();
@@ -188,6 +252,34 @@ pub(super) fn cast_mobility(
     m.cd = (m.cd - dt).max(0.0);
     m.haste_t = (m.haste_t - dt).max(0.0);
     m.vanish_t = (m.vanish_t - dt).max(0.0);
+    let ground = |p: Vec3| world.terrain_height_under(p).unwrap_or(p.y);
+    // A Charge under way carries the hero; at its end, the stop's stun and knockback.
+    if let Some(mut l) = run.mobile.lunge {
+        l.t += dt;
+        let k = (l.t / LUNGE_SECS).min(1.0);
+        if let Ok((_, mut tf)) = hero.single_mut() {
+            let mut at = l.from.lerp(l.to, k);
+            at.y = ground(at);
+            if tf.translation != at {
+                tf.translation = at;
+            }
+        }
+        run.mobile.lunge = if k >= 1.0 { None } else { Some(l) };
+        if k >= 1.0 && l.hit {
+            let secs = run.mobility().map_or(1.5, |d| d.secs);
+            let away = flat(l.to - l.from).normalize_or(Vec3::NEG_Z);
+            for (_, mut t, mut en) in &mut enemies {
+                let off = flat(t.translation - l.to);
+                if en.dead || off.length() > CHARGE_STUN_RADIUS {
+                    continue;
+                }
+                en.stun_t = en.stun_t.max(secs);
+                let mut to = t.translation + off.normalize_or(away) * CHARGE_KNOCKBACK;
+                to.y = ground(to);
+                t.translation = to;
+            }
+        }
+    }
     if *phase.get() != Phase::Playing || run.dead_t.is_some() || !keys.just_pressed(KEY) {
         return;
     }
@@ -215,7 +307,6 @@ pub(super) fn cast_mobility(
             p
         }
     };
-    let ground = |p: Vec3| world.terrain_height_under(p).unwrap_or(p.y);
     match def.kind {
         Move::Blink(yd) => {
             fx.cast(me, def.spell, &[me], None);
@@ -227,32 +318,27 @@ pub(super) fn cast_mobility(
             tf.translation = to;
         }
         Move::Charge(yd) => {
-            // The enemy in reach nearest the cursor (or the hero, with none).
-            let mark = cursor.unwrap_or(pos);
-            let target = enemies
+            // The way the hero runs (the bot's steer, else last frame's stick), else ahead.
+            let run_dir = auto.as_deref().map_or(carry.heading(), super::auto::steer);
+            let dir = flat(run_dir).normalize_or(facing);
+            let alive: Vec<(Entity, Vec2)> = enemies
                 .iter()
-                .filter(|(_, t, e)| !e.dead && hero::reach(pos, t.translation) <= yd)
-                .map(|(e, t, _)| (e, t.translation, hero::reach(mark, t.translation)))
-                .min_by(|a, b| a.2.total_cmp(&b.2));
-            let to = match target {
-                Some((e, at, _)) => {
-                    if let Ok((_, _, mut en)) = enemies.get_mut(e) {
-                        en.stun_t = en.stun_t.max(def.secs);
-                    }
-                    let dir = flat(at - pos).normalize_or(facing);
-                    tf.rotation = Quat::from_rotation_y(super::units::yaw_toward(dir));
-                    fx.cast(me, def.spell, &[e], None);
-                    at - dir * 1.5
-                }
-                None => {
-                    fx.cast(me, def.spell, &[me], None);
-                    tf.rotation = Quat::from_rotation_y(super::units::yaw_toward(toward));
-                    pos + toward * yd * 0.5
-                }
-            };
-            let mut to = leash(to);
+                .filter(|(_, _, e)| !e.dead)
+                .map(|(e, t, _)| (e, t.translation.xz()))
+                .collect();
+            let spots: Vec<Vec2> = alive.iter().map(|a| a.1).collect();
+            let (stop, first) = charge_path(pos.xz(), dir.xz(), yd, &spots);
+            let mut to = leash(Vec3::new(stop.x, pos.y, stop.y));
             to.y = ground(to);
-            tf.translation = to;
+            tf.rotation = Quat::from_rotation_y(super::units::yaw_toward(dir));
+            let target = first.map(|i| alive[i].0);
+            fx.cast(me, def.spell, &[target.unwrap_or(me)], None);
+            run.mobile.lunge = Some(Lunge {
+                from: pos,
+                to,
+                t: 0.0,
+                hit: target.is_some(),
+            });
         }
         Move::Haste(x) => {
             fx.cast(me, def.spell, &[me], None);
@@ -275,4 +361,51 @@ pub(super) fn cast_mobility(
         }
     }
     run.mobile.cd = def.cooldown;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn charge_lunges_without_target() {
+        let (to, hit) = charge_path(Vec2::ZERO, Vec2::new(0.0, 2.0), 25.0, &[]);
+        assert_eq!(hit, None);
+        assert!((to - Vec2::new(0.0, 25.0)).length() < 1e-4);
+        // No direction at all: straight ahead, never nowhere.
+        let (to, _) = charge_path(Vec2::ZERO, Vec2::ZERO, 10.0, &[]);
+        assert!((to.length() - 10.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn charge_stops_at_first_enemy_on_path() {
+        let enemies = [
+            Vec2::new(0.5, 15.0),
+            Vec2::new(-1.0, 8.0),
+            Vec2::new(0.0, 20.0),
+        ];
+        let (to, hit) = charge_path(Vec2::ZERO, Vec2::Y, 25.0, &enemies);
+        assert_eq!(hit, Some(1));
+        // Short of it by the reach, along the line.
+        assert!((to - Vec2::new(0.0, 8.0 - CHARGE_REACH)).length() < 1e-4);
+        // One within reach of the start: no lunge backwards, the hero stays.
+        let (to, hit) = charge_path(Vec2::ZERO, Vec2::Y, 25.0, &[Vec2::new(0.0, 1.0)]);
+        assert_eq!(hit, Some(0));
+        assert_eq!(to, Vec2::ZERO);
+    }
+
+    #[test]
+    fn charge_ignores_enemies_off_path() {
+        let enemies = [
+            // Beside the line, past the reach.
+            Vec2::new(2.0, 10.0),
+            // Behind the hero.
+            Vec2::new(0.0, -3.0),
+            // Past the end and its reach.
+            Vec2::new(0.0, 27.0),
+        ];
+        let (to, hit) = charge_path(Vec2::ZERO, Vec2::Y, 25.0, &enemies);
+        assert_eq!(hit, None);
+        assert!((to - Vec2::new(0.0, 25.0)).length() < 1e-4);
+    }
 }
