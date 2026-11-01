@@ -402,6 +402,17 @@ impl Fx<'_, '_> {
             color: Some(color),
         });
     }
+
+    /// A green "+N" over the hero for a heal it picked up or drank. Always shown, as what heals
+    /// the hero is (`number`).
+    pub fn heal_text(&mut self, anchor: Entity, amount: f32) {
+        self.text.write(CombatTextSpawn {
+            anchor,
+            text: format!("+{}", amount.round().max(1.0) as i64),
+            category: 0,
+            color: Some(COLOR_HEAL),
+        });
+    }
 }
 
 /// Which of the hero's damage numbers float up: all, the critical hits, or none. A setting

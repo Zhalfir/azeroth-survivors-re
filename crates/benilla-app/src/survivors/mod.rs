@@ -17,6 +17,7 @@ mod feedback;
 mod fill;
 mod framecap;
 mod frametime;
+mod globe;
 mod grade;
 #[cfg(target_os = "android")]
 mod graphics;
@@ -77,6 +78,7 @@ impl Plugin for SurvivorsPlugin {
                 secrets::plugin,
                 speed::plugin,
             ))
+            .add_plugins(globe::plugin)
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()

@@ -81,7 +81,8 @@ pub(super) struct Gem {
 }
 
 /// The `GameObjectDisplayInfo` row and scale a pickup wears: a wisp per experience tier, the
-/// bigger tiers rarer, and a turkey leg for health.
+/// bigger tiers rarer. Health is a red globe ([`super::globe`]); the turkey leg is only its
+/// fallback while the globe's meshes are not up.
 fn look_for(kind: GemKind) -> (u32, f32) {
     match kind {
         // `TurkeyLeg.mdx`.
@@ -579,7 +580,9 @@ pub(super) fn drop_loot(
     mut rng: ResMut<Rng>,
     mut run: ResMut<Run>,
     mut gems: Query<&mut Gem>,
+    globes: Option<Res<super::globe::GlobeAssets>>,
 ) {
+    let globes = globes.as_deref();
     let mut count = gems.iter().count();
     for d in drops.read() {
         // A boss leaves a full heal and a chest; the horde, now and then, a quarter of the
@@ -592,11 +595,12 @@ pub(super) fn drop_loot(
         };
         if d.boss || rng.f32() < potion_chance {
             let heal = GemKind::Heal(if d.boss { 1.0 } else { 0.25 });
-            spawn_gem(&mut commands, run.guid(), d.pos + Vec3::X * 0.8, heal);
+            spawn_gem(&mut commands, globes, run.guid(), d.pos + Vec3::X * 0.8, heal);
         }
         if d.boss {
             spawn_gem(
                 &mut commands,
+                globes,
                 run.guid(),
                 d.pos - Vec3::X * 0.8,
                 GemKind::Chest,
@@ -610,14 +614,29 @@ pub(super) fn drop_loot(
                 continue;
             }
         }
-        spawn_gem(&mut commands, run.guid(), d.pos, GemKind::Xp(d.xp));
+        spawn_gem(&mut commands, globes, run.guid(), d.pos, GemKind::Xp(d.xp));
         count += 1;
     }
 }
 
-fn spawn_gem(commands: &mut Commands, serial: u64, pos: Vec3, kind: GemKind) {
-    let (display, scale) = look_for(kind);
-    let e = units::spawn_object(commands, serial, display, scale, pos + Vec3::Y * 0.5);
+fn spawn_gem(
+    commands: &mut Commands,
+    globes: Option<&super::globe::GlobeAssets>,
+    serial: u64,
+    pos: Vec3,
+    kind: GemKind,
+) {
+    let at = pos + Vec3::Y * 0.5;
+    let e = match (kind, globes) {
+        // A boss's full heal is a bigger globe.
+        (GemKind::Heal(share), Some(g)) => {
+            super::globe::spawn_globe(commands, g, at, if share >= 1.0 { 1.4 } else { 1.0 })
+        }
+        _ => {
+            let (display, scale) = look_for(kind);
+            units::spawn_object(commands, serial, display, scale, at)
+        }
+    };
     commands.entity(e).insert(Gem {
         kind,
         pulled: false,
@@ -631,11 +650,12 @@ pub(super) fn collect_gems(
     time: Res<Time>,
     mut run: ResMut<Run>,
     mut next: ResMut<NextState<Phase>>,
-    hero: Query<&Transform, (With<Hero>, Without<Gem>)>,
+    hero: Query<(Entity, &Transform), (With<Hero>, Without<Gem>)>,
     mut gems: Query<(Entity, &mut Transform, &mut Gem)>,
     mut secrets: MessageWriter<super::secrets::SecretEvent>,
+    mut fx: Fx,
 ) {
-    let Ok(h) = hero.single() else { return };
+    let Ok((hero_e, h)) = hero.single() else { return };
     if run.dead_t.is_some() {
         return;
     }
@@ -658,7 +678,14 @@ pub(super) fn collect_gems(
                     run.xp += gained;
                     super::combatlog::xp(gained);
                 }
-                GemKind::Heal(share) => run.hp = (run.hp + share * stats.max_hp).min(stats.max_hp),
+                GemKind::Heal(share) => {
+                    let before = run.hp;
+                    run.hp = (run.hp + share * stats.max_hp).min(stats.max_hp);
+                    let healed = run.hp - before;
+                    if healed >= 0.5 {
+                        fx.heal_text(hero_e, healed);
+                    }
+                }
                 GemKind::Chest => {
                     run.pending_levels += 1;
                     run.banner = Some(("A treasure chest! Choose a power.".into(), 3.0));
