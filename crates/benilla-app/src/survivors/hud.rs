@@ -1015,6 +1015,29 @@ pub(super) fn build_maxed(run: &Run) -> bool {
     abilities_done && passives_done
 }
 
+/// With sets owed and nothing left to pick, each owed level heals a fifth of the pool instead and
+/// the debt is cleared; true when it was. Called where levels are earned and after each pick, so
+/// a build maxed mid-stack never deals a lone Heal card.
+pub(super) fn bank_maxed(run: &mut Run) -> bool {
+    if run.pending_levels == 0 || !build_maxed(run) {
+        return false;
+    }
+    let max = run.stats().max_hp;
+    let heal = 0.2 * max * run.pending_levels as f32;
+    run.hp = (run.hp + heal).min(max);
+    run.pending_levels = 0;
+    run.pending_chests = 0;
+    true
+}
+
+/// The level a level-up set was earned at, with `pending_levels` sets owed of which
+/// `pending_chests` are chests': the owed level sets are the last levels reached, taken oldest
+/// first.
+pub(super) fn earned_level(level: u32, pending_levels: u32, pending_chests: u32) -> u32 {
+    let level_sets = pending_levels.saturating_sub(pending_chests).max(1);
+    (level + 1).saturating_sub(level_sets).max(1)
+}
+
 fn choices_for(run: &Run, rng: &mut Rng) -> Vec<Choice> {
     let mut pool: Vec<(Choice, f32)> = Vec::new();
     for (i, o) in run.abilities.iter().enumerate() {
@@ -1089,8 +1112,17 @@ pub(super) fn pick(i: usize, run: &mut Run, offer: &mut Offer, rng: &mut Rng) {
         ),
         Choice::Heal => "heal".to_string(),
     };
-    let from = if offer.chest { "chest" } else { "level" };
-    super::combatlog::event(run.elapsed, format!("{from} {}: {picked}", run.level));
+    // A chest's set has no level of its own; a level's names the level it was earned at, not the
+    // hero's level now (sets wait while play goes on).
+    let from = if offer.chest {
+        "chest".to_string()
+    } else {
+        format!(
+            "level {}",
+            earned_level(run.level, run.pending_levels, run.pending_chests)
+        )
+    };
+    super::combatlog::event(run.elapsed, format!("{from}: {picked}"));
     let max_before = run.stats().max_hp;
     match choice {
         Choice::NewAbility(def) => run.abilities.push(Owned {
@@ -1113,7 +1145,9 @@ pub(super) fn pick(i: usize, run: &mut Run, offer: &mut Offer, rng: &mut Rng) {
         run.pending_chests = run.pending_chests.saturating_sub(1);
     }
     run.pending_levels = run.pending_levels.saturating_sub(1);
-    if run.pending_levels > 0 {
+    // This pick may have maxed the build: the rest of the debt heals at once, and no set of a
+    // lone Heal is dealt for a frame.
+    if run.pending_levels > 0 && !bank_maxed(run) {
         deal(run, rng, offer);
     } else {
         offer.clear();
@@ -1617,19 +1651,28 @@ fn set_width(n: &mut Mut<Node>, w: Val) {
     }
 }
 
+/// The numbers the vitals panel last wrote, by the text entity holding them: a string is built
+/// only when one changes (A11 review).
+#[derive(Default)]
+pub(super) struct VitalsShown {
+    hp: Option<(Entity, (u32, u32))>,
+    level: Option<(Entity, u32)>,
+}
+
 /// The health and XP panel by the action thumb: fills, numbers and level, each written only on
-/// a change.
+/// a change. It runs in a run's phases only (`Playing`, `Paused`).
 #[allow(clippy::type_complexity)]
 pub(super) fn thumb_vitals(
     run: Res<Run>,
+    mut shown: Local<VitalsShown>,
     mut fills: ParamSet<(
         Query<&mut Node, With<HpFill>>,
         Query<&mut Node, With<ShieldFill>>,
         Query<&mut Node, With<XpFill>>,
     )>,
     mut texts: ParamSet<(
-        Query<&mut Text, With<HpText>>,
-        Query<&mut Text, With<VitalsLevel>>,
+        Query<(Entity, &mut Text), With<HpText>>,
+        Query<(Entity, &mut Text), With<VitalsLevel>>,
     )>,
 ) {
     let stats = run.stats();
@@ -1652,14 +1695,18 @@ pub(super) fn thumb_vitals(
     if let Ok(mut n) = fills.p2().single_mut() {
         set_width(&mut n, pct(xp));
     }
-    if let Ok(mut t) = texts.p0().single_mut() {
-        set_text(
-            &mut t,
-            format!("{} / {}", run.hp.max(0.0).ceil() as u32, stats.max_hp.round() as u32),
-        );
+    let hp_nums = (run.hp.max(0.0).ceil() as u32, stats.max_hp.round() as u32);
+    if let Ok((e, mut t)) = texts.p0().single_mut() {
+        if shown.hp != Some((e, hp_nums)) {
+            shown.hp = Some((e, hp_nums));
+            set_text(&mut t, format!("{} / {}", hp_nums.0, hp_nums.1));
+        }
     }
-    if let Ok(mut t) = texts.p1().single_mut() {
-        set_text(&mut t, run.level.to_string());
+    if let Ok((e, mut t)) = texts.p1().single_mut() {
+        if shown.level != Some((e, run.level)) {
+            shown.level = Some((e, run.level));
+            set_text(&mut t, run.level.to_string());
+        }
     }
 }
 

@@ -180,7 +180,8 @@ impl Plugin for SurvivorsPlugin {
                     hud::fill_art,
                     hud::place_thumb,
                     hud::icon_tooltip,
-                    hud::thumb_vitals,
+                    hud::thumb_vitals
+                        .run_if(in_state(Phase::Playing).or(in_state(Phase::Paused))),
                     hud::demo_label,
                     minimap::map_buttons,
                     minimap::zone_text,

@@ -739,13 +739,8 @@ pub(super) fn collect_gems(
             }
         }
     }
-    if run.pending_levels > 0 && super::hud::build_maxed(&run) {
-        // Nothing left to pick: each level heals a fifth of the pool, and play goes on.
-        let heal = 0.2 * stats.max_hp * run.pending_levels as f32;
-        run.hp = (run.hp + heal).min(stats.max_hp);
-        run.pending_levels = 0;
-        run.pending_chests = 0;
-    }
+    // Nothing left to pick: each level heals a fifth of the pool, and play goes on.
+    super::hud::bank_maxed(&mut run);
     // Owed sets wait in the stack over the action thumb (`cards`); play goes on.
 }
 

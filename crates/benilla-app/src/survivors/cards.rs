@@ -140,14 +140,30 @@ pub(super) fn rarity(choice: Choice, run: &Run) -> Rarity {
 
 /// The stack's width and a row's height, in UI units: a thumb's target (at least 44).
 pub(super) const STACK_W: f32 = 220.0;
-pub(super) const ROW_H: f32 = 48.0;
-const ROW_GAP: f32 = 6.0;
-const HEADER_H: f32 = 28.0;
+/// 46 with 4-unit gaps and a 24-unit header (were 48, 6 and 28): the full stack is 16 units
+/// shorter, so its "Level up" header clears the Menu button above by [`MENU_CLEARANCE`] while its
+/// foot stays over the action arc (A11 review, 2026-11-01).
+pub(super) const ROW_H: f32 = 46.0;
+const ROW_GAP: f32 = 4.0;
+const HEADER_H: f32 = 24.0;
+/// The most rows a set shows (`hud::choices_for`).
+const MAX_ROWS: f32 = 3.0;
+/// The full stack's height: the header and three rows.
+const STACK_MAX_H: f32 = HEADER_H + ROW_GAP + MAX_ROWS * ROW_H + (MAX_ROWS - 1.0) * ROW_GAP;
 /// The stack's inset from the action side's edge.
 pub(super) const STACK_SIDE: f32 = 12.0;
 /// The stack's foot: over the action arc (F, Q, C and the R slot kept for Phase C, `touch`)
 /// and its key hints.
 pub(super) const STACK_BOTTOM: f32 = SAFE_BOTTOM + 244.0;
+/// The touch Menu button's centre from the top edge, under the minimap (`touch`).
+pub(super) const MENU_CENTRE_TOP: f32 = 215.0;
+/// How far below a 64-unit play button's centre its `UI-Quickslot2` frame (1.84 slots, from
+/// 0.42 of a slot above it) and its key hint under it reach: the button's visual bottom.
+pub(super) const BUTTON_REACH: f32 = 59.0;
+/// The clear space kept between the Menu button's bottom and the stack's header.
+pub(super) const MENU_CLEARANCE: f32 = 24.0;
+/// The UI's height in units (`hud::apply_ui_scale`).
+const SCREEN_UNITS: f32 = 768.0;
 /// The tooltip's width and its gap from the stack.
 const TIP_W: f32 = 250.0;
 const TIP_GAP: f32 = 10.0;
@@ -722,6 +738,31 @@ pub(super) fn animate_stack(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    /// A level set's log label names the level it was earned at, oldest owed first.
+    #[test]
+    fn owed_sets_name_their_level() {
+        assert_eq!(hud::earned_level(10, 1, 0), 10);
+        assert_eq!(hud::earned_level(10, 3, 0), 8);
+        // A chest owed besides: two level sets, levels 9 and 10.
+        assert_eq!(hud::earned_level(10, 3, 1), 9);
+        assert_eq!(hud::earned_level(1, 5, 0), 1);
+    }
+
+    /// The full stack sits between the Menu button (top right) and the action arc (C the
+    /// highest, centred `SAFE_BOTTOM + 180` over the bottom edge, `touch::BUTTONS`).
+    #[test]
+    fn stack_clears_menu_and_arc() {
+        let header_top = SCREEN_UNITS - STACK_BOTTOM - STACK_MAX_H;
+        let menu_bottom = MENU_CENTRE_TOP + BUTTON_REACH;
+        assert!(
+            header_top - menu_bottom >= MENU_CLEARANCE,
+            "header at {header_top}, Menu to {menu_bottom}"
+        );
+        let arc_top = SAFE_BOTTOM + 180.0 + BUTTON_REACH;
+        assert!(STACK_BOTTOM >= arc_top, "stack foot {STACK_BOTTOM}, arc to {arc_top}");
+        assert!(ROW_H >= 44.0, "a thumb's target");
+    }
 
     #[test]
     fn stack_shows_while_pending_and_game_runs() {

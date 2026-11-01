@@ -74,7 +74,7 @@ const BUTTONS: [(KeyCode, Option<&str>, Vec2, bool); 4] = [
     (
         KeyCode::Escape,
         Some("Interface\\Icons\\Spell_Nature_Sleep"),
-        Vec2::new(45.0, 215.0),
+        Vec2::new(45.0, super::cards::MENU_CENTRE_TOP),
         false,
     ),
 ];
