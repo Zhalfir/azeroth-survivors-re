@@ -273,6 +273,11 @@ pub(super) fn cast_mobility(
                 if en.dead || off.length() > CHARGE_STUN_RADIUS {
                     continue;
                 }
+                // Bosses as `Effect::Stun` treats them: 30 % of the stun, and no knockback.
+                if en.boss {
+                    en.stun_t = en.stun_t.max(secs * 0.3);
+                    continue;
+                }
                 en.stun_t = en.stun_t.max(secs);
                 let mut to = t.translation + off.normalize_or(away) * CHARGE_KNOCKBACK;
                 to.y = ground(to);

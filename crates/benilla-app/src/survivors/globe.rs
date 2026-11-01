@@ -47,7 +47,8 @@ pub(super) struct GlobeBall;
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, setup_assets)
-        .add_systems(Update, animate_globes);
+        // Only where the 3D materials exist (`setup_assets` makes `GlobeAssets` from them).
+        .add_systems(Update, animate_globes.run_if(resource_exists::<GlobeAssets>));
 }
 
 fn setup_assets(
@@ -143,11 +144,14 @@ pub(super) fn spawn_globe(
         .id()
 }
 
+/// The pulse's update rate: the shared material is rewritten at most this often.
+const PULSE_STEP_HZ: f32 = 30.0;
+
 /// The bob on every ball, and the shared glow's pulse, only while a globe is out.
 fn animate_globes(
     time: Res<Time>,
-    assets: Option<Res<GlobeAssets>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
+    assets: Res<GlobeAssets>,
+    mats: Option<ResMut<Assets<StandardMaterial>>>,
     mut balls: Query<&mut Transform, With<GlobeBall>>,
 ) {
     if balls.is_empty() {
@@ -158,8 +162,18 @@ fn animate_globes(
     for mut tf in &mut balls {
         tf.translation.y = y;
     }
-    if let Some(m) = assets.and_then(|a| mats.get_mut(&a.ball_mat)) {
-        m.emissive = GLOW * (GLOW_GAIN * pulse(t));
+    // The pulse at ~30 Hz steps, and the material written only when it moved: a write
+    // re-uploads it.
+    let stepped = (t * PULSE_STEP_HZ).floor() / PULSE_STEP_HZ;
+    let want = GLOW * (GLOW_GAIN * pulse(stepped));
+    let Some(mut mats) = mats else { return };
+    let moved = mats
+        .get(&assets.ball_mat)
+        .is_some_and(|m| (m.emissive.red - want.red).abs() > 1e-3);
+    if moved {
+        if let Some(m) = mats.get_mut(&assets.ball_mat) {
+            m.emissive = want;
+        }
     }
 }
 

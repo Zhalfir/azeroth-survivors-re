@@ -2,8 +2,8 @@
 //! ultimate), on the HUD and on the touch cluster alike:
 //!
 //! - **Charging:** the icon greyed, a dark sweep emptying clockwise as WoW's cooldown clock, and
-//!   the seconds left in the centre (tenths under 3 s). Sweep and number change only when the
-//!   shown value does.
+//!   the seconds left in the centre (tenths under 3 s). The number changes only when the shown
+//!   value does, the sweep at 0.1 s steps so it turns smoothly.
 //! - **Ready:** full colour, one gold ring flash (1.0→1.4×, fading over 0.35 s) with a soft click,
 //!   then a slow gold edge glow (1 Hz) until it is used.
 //! - **Pressed:** a 0.9× squash for 0.08 s.
@@ -41,6 +41,16 @@ pub(super) fn action_state(cd: f32, max: f32) -> ActionState {
     ActionState::Charging(frac, label)
 }
 
+/// The sweep moves in tenth-of-a-second steps: `cd` rounded up to its tenth, and the share of
+/// `max` that step leaves.
+pub(super) fn sweep_step(cd: f32, max: f32) -> (i32, f32) {
+    if cd <= 0.0 {
+        return (0, 0.0);
+    }
+    let step = ((cd * 10.0) - 1e-3).ceil().max(1.0) as i32;
+    (step, (step as f32 / 10.0 / max.max(0.01)).clamp(0.0, 1.0))
+}
+
 /// Which run cooldown a button shows, and the key it presses.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum ActionSource {
@@ -71,6 +81,8 @@ pub(super) struct ActionButton {
 pub(super) struct ActionView {
     /// The label last drawn; `None` before the first frame.
     shown: Option<String>,
+    /// The sweep's step last drawn, in tenths of a second left ([`sweep_step`]).
+    swept: Option<i32>,
     ready: Option<bool>,
     flash_t: f32,
     press_t: f32,
@@ -224,8 +236,10 @@ fn feed_buttons(run: Res<Run>, mut buttons: Query<(&ActionSource, &mut ActionBut
 /// What one button's children should draw this frame.
 struct Look {
     owner: Entity,
-    /// A new label and sweep, when the shown value changed.
-    label: Option<(String, f32)>,
+    /// A new label, when the shown value changed.
+    label: Option<String>,
+    /// A new sweep share, when its tenth-of-a-second step changed.
+    sweep: Option<f32>,
     ring: f32,
     glow: f32,
     deny: f32,
@@ -275,13 +289,18 @@ fn draw_buttons(
         if live && !ready && keys.just_pressed(source.key()) {
             view.deny_t = DENY_FLASH;
         }
-        let (label, frac) = match state {
-            ActionState::Charging(frac, label) => (label, frac),
-            ActionState::Ready => (String::new(), 0.0),
+        let label = match state {
+            ActionState::Charging(_, label) => label,
+            ActionState::Ready => String::new(),
         };
         let changed = view.shown.as_ref() != Some(&label);
         if changed {
             view.shown = Some(label.clone());
+        }
+        let (step, frac) = sweep_step(b.cd, b.max);
+        let swept = view.swept != Some(step);
+        if swept {
+            view.swept = Some(step);
         }
         let squash = if view.press_t > 0.0 { 0.9 } else { 1.0 };
         if tf.scale.x != squash {
@@ -296,7 +315,8 @@ fn draw_buttons(
         };
         looks.push(Look {
             owner,
-            label: changed.then_some((label, frac)),
+            label: changed.then_some(label),
+            sweep: swept.then_some(frac),
             ring,
             glow,
             deny: view.deny_t / DENY_FLASH,
@@ -307,16 +327,16 @@ fn draw_buttons(
     }
     let look = |e: Entity| looks.iter().find(|l| l.owner == e);
     for (label, mut text) in &mut labels {
-        if let Some((s, _)) = look(label.0).and_then(|l| l.label.as_ref()) {
+        if let Some(s) = look(label.0).and_then(|l| l.label.as_ref()) {
             if text.0 != *s {
                 text.0 = s.clone();
             }
         }
     }
     for sweep in &sweeps {
-        if let Some((_, f)) = look(sweep.owner).and_then(|l| l.label.as_ref()) {
+        if let Some(f) = look(sweep.owner).and_then(|l| l.sweep) {
             if let Some(m) = mats.get_mut(&sweep.handle) {
-                m.sweep = *f;
+                m.sweep = f;
             }
         }
     }
@@ -401,5 +421,20 @@ mod tests {
             action_state(8.0, 8.0),
             ActionState::Charging(1.0, "8".into())
         );
+    }
+
+    #[test]
+    fn sweep_moves_in_tenths() {
+        assert_eq!(sweep_step(0.0, 8.0), (0, 0.0));
+        assert_eq!(sweep_step(8.0, 8.0), (80, 1.0));
+        // 7.93 and 7.91 share a step; 7.89 is the next.
+        assert_eq!(sweep_step(7.93, 8.0).0, 80);
+        assert_eq!(sweep_step(7.93, 8.0), sweep_step(7.91, 8.0));
+        assert_ne!(sweep_step(7.91, 8.0), sweep_step(7.89, 8.0));
+        let (s, f) = sweep_step(4.0, 8.0);
+        assert_eq!(s, 40);
+        assert!((f - 0.5).abs() < 1e-6);
+        // A hair left still shows one step.
+        assert_eq!(sweep_step(0.01, 8.0).0, 1);
     }
 }

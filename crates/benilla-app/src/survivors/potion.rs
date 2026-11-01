@@ -24,10 +24,14 @@ pub(super) fn potion_heal(d: Difficulty) -> f32 {
     }
 }
 
-/// Whether a press drinks: alive, in play, and off cooldown. Full health still drinks (the
-/// button only dims), so a press is never silently refused for that.
+/// Whether a press drinks: alive, in play, hurt, and off cooldown. At full health a press does
+/// nothing and spends no cooldown; the button is dimmed to say so (batch 1 review).
 pub(super) fn can_drink(run: &Run, phase: Phase) -> bool {
-    phase == Phase::Playing && run.dead_t.is_none() && run.hp > 0.0 && run.potion_cd <= 0.0
+    phase == Phase::Playing
+        && run.dead_t.is_none()
+        && run.hp > 0.0
+        && run.hp < run.stats().max_hp
+        && run.potion_cd <= 0.0
 }
 
 /// The cooldown after `dt` seconds of run time.
@@ -43,8 +47,13 @@ pub(super) fn drink_potion(
     mut run: ResMut<Run>,
     auto: Option<Res<super::auto::Auto>>,
     hero: Query<Entity, With<Hero>>,
+    loading: Res<crate::loading_screen::LoadingScreen>,
     mut fx: Fx,
 ) {
+    // Behind a battleground's loading screen the run waits, and so does the potion.
+    if loading.covering() {
+        return;
+    }
     let dt = time.delta_secs();
     if run.potion_cd > 0.0 {
         run.potion_cd = tick(run.potion_cd, dt);
@@ -80,10 +89,13 @@ mod tests {
     #[test]
     fn potion_ignored_when_dead_or_paused() {
         let mut run = Run::default();
+        run.hp = run.stats().max_hp * 0.5;
         assert!(can_drink(&run, Phase::Playing));
-        // Full health still drinks: the button only dims.
+        // Full health: nothing, and no cooldown spent (the button only dims).
+        let hurt = run.hp;
         run.hp = run.stats().max_hp;
-        assert!(can_drink(&run, Phase::Playing));
+        assert!(!can_drink(&run, Phase::Playing));
+        run.hp = hurt;
         for phase in [Phase::Paused, Phase::LevelUp, Phase::Menu, Phase::GameOver] {
             assert!(!can_drink(&run, phase), "{phase:?}");
         }
