@@ -21,6 +21,98 @@ Pick a class and a battleground, then survive: WASD to move, your abilities cast
 enemies swarm in waves, you level up and pick upgrades, and a boss shows up every couple of
 minutes. **No server, no login, no account** — fully offline and self-contained.
 
+## This fork: the Android tablet edition
+
+This fork ([Zhalfir/azeroth-survivors-re](https://github.com/Zhalfir/azeroth-survivors-re), branch
+`mobile-graphics`) takes the local build to **Android tablets**. It is a native ARM64 app with
+touch controls, tuned for a Samsung Galaxy Tab S9+, and it adds new modes and systems on top of
+the original game. It is a personal, non-commercial sideload project and a work in progress.
+
+### Thank you
+
+None of this would exist without:
+
+- **[Aethus](https://wow.aethus.pl/)**, who designed and made *Azeroth Survivors*. Play the original at
+  [wow.aethus.pl](https://wow.aethus.pl/).
+- **[OutThisLife](https://github.com/OutThisLife/azeroth-survivors-re)**, for the from-source local
+  build this fork starts from.
+- **[samwhosung/benilla](https://github.com/samwhosung/benilla)**, the from-scratch WoW 1.12.1
+  client in Rust, and **[Arnesen/wenilla](https://github.com/Arnesen/wenilla)**, its web and realm fork.
+- **[Bevy](https://bevy.org)** and the Rust game-dev community.
+- **Blizzard Entertainment**, for World of Warcraft, the game all of this is a love letter to.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/android/menu.jpg" alt="The Android menu: characters, talents, records, secrets and difficulty"></td>
+    <td width="50%"><img src="docs/screenshots/android/talents.jpg" alt="Talent trees with each class's own Vanilla icons and generic, easy-to-balance stats"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/android/secrets.jpg" alt="The Secrets page: 13 hidden races, each with a cryptic riddle"></td>
+    <td><img src="docs/screenshots/android/thumb-hud-mockup.png" alt="The thumb HUD: level-up choices wait by the right thumb while the run goes on"></td>
+  </tr>
+</table>
+
+### What's new in this edition
+
+- **Native Android build** with touch controls: a floating stick, an action-button arc for the right
+  thumb, a free camera with a lock that keeps your view, an optional **stick on the right** for
+  smaller screens, and the soft keyboard for naming characters.
+- **Characters and progression:** up to 8 named characters, generic talent trees (one point per
+  milestone, easy to balance) with each class's own Vanilla icons, and records that keep each
+  character's full name.
+- **Difficulties:** **Normal**, **Heroic** (clear every Normal zone) and **Mythic** (clear every
+  Heroic zone, built as an achievement). Their health, damage and crowd multipliers ease in over
+  each run.
+- **Demo mode:** a bot plays the run for you. It is also what runs the balance tests.
+- **2× game speed**, Vampire Survivors-style, from a button by the clock.
+- **The thumb HUD:** level-up choices wait in a compact stack by the right thumb **while the game
+  keeps running**. Tap once to preview, twice to take. Health and XP sit by the action buttons.
+- **Survival tools:**
+  - an on-demand **potion** with a cooldown that is weaker on harder difficulties;
+  - glowing red **health globes**;
+  - **Lifestealing** as a passive;
+  - **Warrior block** and **Rogue dodge** built in;
+  - a **Charge** that lunges without a target and stuns the pack it hits.
+- **Boss frames and nameplates**, with fewer adds while the final boss is up.
+- **13 secret races** with cryptic riddles, among them the Goblin, a Skeleton Paladin, the Murloc
+  and the Felguard. They are look-only, with Classic-style class limits.
+- **Mobile performance work:**
+  - a frame cap (30/60/uncapped);
+  - SGSR upscaling;
+  - a lean plugin set that disables what the survivors mode doesn't need;
+  - animation and effect level of detail;
+  - thermal-aware tuning;
+  - an on-device frame-time and GPU meter.
+- **Diagnostics:** a per-run combat log (`Diagnostics/runs/*.jsonl`) and crash reports, used to tune
+  balance from real runs.
+
+Coming next: Reroll / Skip / Banish, the **Soulstone** (a rare boss drop that revives you), new
+Vanilla skills per class with **evolutions**, and late-game **ultimates** on the 31-point
+capstone.
+
+### Build and install on Android
+
+You need [Rust](https://rustup.rs/) with the `aarch64-linux-android` target,
+`cargo install cargo-ndk`, the Android SDK command-line tools with build-tools, a platform and the
+NDK (`ANDROID_HOME`), **JDK 17** and `adb`. You also need your own WoW 1.12.1 client's `Data`
+folder (see [The game data](#the-game-data-not-in-this-repo)).
+
+```bash
+git clone -b mobile-graphics https://github.com/Zhalfir/azeroth-survivors-re
+cd azeroth-survivors-re
+export JAVA_HOME=/path/to/jdk-17
+crates/survivors-android/android/build-apk.sh          # → azeroth-survivors.apk (the build is ~6 GB)
+crates/survivors-android/android/install.sh /path/to/WoW/Data   # installs + copies the MPQs to the device
+```
+
+`APK_FEATURES=dev` adds the on-device GPU frame meter. The data copy goes into the app's own
+folder (`/sdcard/Android/data/local.azeroth.survivors/files/Data`), so the app needs no storage
+permission.
+
+---
+
+## The original local build
+
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/menu.jpg" alt="The pick screen: race, gender and class on the left, sixteen zones on the right, the hero in between"></td>
