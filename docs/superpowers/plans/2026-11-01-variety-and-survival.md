@@ -47,6 +47,14 @@ The tablet is held in two hands. The left thumb owns the stick, the right thumb 
 
 The cluster anchors to the corner (`right`/`bottom` offsets, not absolute x/y), so it survives any aspect ratio. It sits above `SAFE_BOTTOM`, and never under the 2× speed button or the clock row.
 
+**Cooldown states, shared by every action button** (mobility, potion, ultimate). One component, `ActionButton { cd: f32, max: f32 }`, drives all three:
+- **Charging:** the icon is greyscale (tinted to 35% luminance), with a dark radial sweep that empties clockwise like WoW's cooldown clock. Whole seconds are shown in the centre (white, outlined, at least 18 units). Below 3 s, tenths show.
+- **Ready:** the icon returns to full colour. One bright "ready" flash plays: a gold ring expands 1.0→1.4× and fades over 0.35 s, with a soft click sound. The edge then keeps a slow gold glow pulse (1 Hz, alpha 0.5–1.0) until it is used.
+- **Pressed:** a 0.9× squash for 0.08 s, then the button goes back to Charging.
+- **Pressed while charging:** a short red edge flash and no action. This doubles as the "not ready" feedback.
+- **Updates:** the sweep and number update only when the shown value changes (every whole second, or every 0.1 s under 3 s). The glow animates its own alpha only.
+- **Pure test:** `action_state(cd, max) -> {Charging(frac, label), Ready}`, with labels "12", "2.4" and Ready at cd ≤ 0.
+
 **Soulstone held**: a small soulstone icon (spell 20707's icon) right of the HP bar, with no text. When the soulstone is used, a full-screen purple flash and the "Soulstone" spell visual on the hero mark the revive.
 
 **Card screen** (level-up): a row of three secondary buttons under the cards, `Reroll (n)`, `Skip`, `Banish (n)`, each 44 units tall. Count 0 dims a button. Keys: R reroll, K skip, B banish, so they don't clash with WASD.
@@ -98,7 +106,7 @@ The cluster anchors to the corner (`right`/`bottom` offsets, not absolute x/y), 
 
 - [ ] Step 1: tests `potion_heal_by_difficulty`, `potion_ignored_when_dead_or_paused` and `potion_cooldown_counts_run_time`.
 - [ ] Step 2: implement. It heals instantly, plays the Healing Potion visual (spell 441) and its sound, then starts the cooldown.
-- [ ] Step 3: HUD button in the action cluster (UI layout section). The radial sweep updates only when `potion_cd` crosses whole 0.1 s steps.
+- [ ] Step 3: create `survivors/action_button.rs` (the shared cooldown states in the UI layout section: greyscale and sweep while charging, a ready flash plus a gold glow pulse, a red flash when pressed early), with test `action_state_labels_and_ready`. Use it for the potion button **and** retrofit the existing mobility button to it.
 - [ ] Step 4: the bot drinks below 30% HP.
 - [ ] Step 5: commit.
 
