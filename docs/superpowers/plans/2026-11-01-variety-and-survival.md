@@ -350,3 +350,16 @@ One task per class, the same shape as B3 and B4: about 6 skills and 2 evolutions
 - the bot rule.
 
 The user approves it, then a plan follows.
+
+---
+
+## Queued (user feedback, 2026-11-01, not started)
+
+- **D1: desktop WoW-style mouse controls** (Mac/desktop only; the tablet is unchanged).
+  - The camera starts unlocked, orbiting behind the hero; the wheel zooms; C toggles the locked top-down view.
+  - Left-drag orbits the camera without turning the hero. Right-drag turns the camera and the hero together.
+  - WASD moves relative to the camera. Both mouse buttons held runs forward along the camera heading.
+  - F casts along facing/movement instead of at the cursor.
+- **P1: preload during the loading screen.** On the Mac run, 0.1-0.8 s hitches came the first time each new thing appeared: new skills' effects, a boss arriving, new enemy types, the win. Warm the zone roster's creature displays, its bosses, the class's spell visuals and sounds, and the GPU pipelines before the run starts. This helps the tablet too.
+- **Optional:** copy the WoW Data folder (5.5 GB) from the Passport drive to the Mac's internal SSD, and point the app's launcher at it.
+- **iOS:** deferred. It first needs ~30 GB free and Xcode; then a survivors-ios shell, and touch cfgs extended to iOS.
