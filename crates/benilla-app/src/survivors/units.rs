@@ -372,12 +372,18 @@ impl Fx<'_, '_> {
 
     /// A melee swing: the attack animation, the victim's flinch, blood and the hit sound.
     pub fn swing(&mut self, attacker: Entity, victim: Entity, damage: f32) {
+        self.swing_as(attacker, victim, damage, 1);
+    }
+
+    /// A melee swing with the victim's `victimState`: 1 a hit, 2 a dodge (the whoosh), 5 a block
+    /// (the shield's clang, `sound::combat`).
+    pub fn swing_as(&mut self, attacker: Entity, victim: Entity, damage: f32, victim_state: u32) {
         let seq = self.seq.next();
         self.swings.write(SwingMessage {
             attacker,
             victim: Some(victim),
             hit_info: 0x2,
-            victim_state: 1,
+            victim_state,
             damage: damage.max(0.0) as u32,
             displayed: false,
             seq,
@@ -411,6 +417,16 @@ impl Fx<'_, '_> {
             text: format!("+{}", amount.round().max(1.0) as i64),
             category: 0,
             color: Some(COLOR_HEAL),
+        });
+    }
+
+    /// A word floating over `anchor` ("Block", "Dodge"), 0xAARRGGBB.
+    pub fn word(&mut self, anchor: Entity, text: &str, color: u32) {
+        self.text.write(CombatTextSpawn {
+            anchor,
+            text: text.into(),
+            category: 0,
+            color: Some(color),
         });
     }
 }

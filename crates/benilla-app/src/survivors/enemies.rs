@@ -9,11 +9,15 @@ use bevy::prelude::*;
 
 use super::abilities::Hit;
 use super::data::{self, EnemyDef};
+use super::guard;
 use super::hero::{self, Hero, HERO_RADIUS};
 use super::units::{self, flat, yaw_toward, Fx, Marks, UnitSpec, COLOR_HURT};
 use super::{Phase, Rng, Run, Selection};
 use crate::creature_anim::{move_flags, MovementState};
 use crate::net::{FieldChanged, Guid, ObjectStore};
+
+/// "Block" and "Dodge" over the hero: white, as the client floats its own misses.
+const COLOR_GUARD: u32 = 0xFFFF_FFFF;
 
 #[derive(Component)]
 pub(super) struct Enemy {
@@ -356,6 +360,7 @@ pub(super) fn move_enemies(
     mut fx: Fx,
     mut hits: MessageWriter<Hit>,
     mut scratch: Local<Separation>,
+    mut rng: ResMut<Rng>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 {
@@ -500,9 +505,27 @@ pub(super) fn move_enemies(
             };
             let raw = e.damage * e.weaken;
             let hp_before = run.hp;
-            let taken = hero::hurt_hero(&mut run, raw);
+            // A swing is a direct blow: the class's guard may turn it. Not while the hero is
+            // immune anyway, so no "Block" floats over a blow that would not land.
+            let open = run.immune_t <= 0.0 && !hero::god_mode();
+            let (raw, guarded) = if open {
+                guard::mitigate(run.class.guard, guard::Hit::Direct, raw, rng.f32())
+            } else {
+                (raw, None)
+            };
+            let taken = match guarded {
+                Some(guard::Guarded::Dodge) => 0.0,
+                _ => hero::hurt_hero(&mut run, raw),
+            };
             super::combatlog::hurt(e.def.name, taken, hp_before, e.boss, run.elapsed);
-            fx.swing(ent, hero_e, taken);
+            match guarded {
+                Some(g) => {
+                    run.guarded = Some((g, run.elapsed));
+                    fx.swing_as(ent, hero_e, taken, g.victim_state());
+                    fx.word(hero_e, g.word(), COLOR_GUARD);
+                }
+                None => fx.swing(ent, hero_e, taken),
+            }
             if taken > 0.0 {
                 fx.number(hero_e, taken, false, COLOR_HURT);
             }

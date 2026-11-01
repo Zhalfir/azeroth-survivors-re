@@ -1,6 +1,8 @@
 //! The mode's tables: classes, abilities, passives, enemies and the wave clock. Spell ids name
 //! `Spell.dbc` rows only for their icon, name and visual chain; every number here is the mode's.
 
+use super::guard::Guard;
+
 /// A weapon on the hero's virtual item slots: `(slot, display, class, subclass, material, inv,
 /// sheath)`, the creature form of `UNIT_VIRTUAL_ITEM_SLOT_DISPLAY` and `_INFO`.
 pub(crate) type Weapon = (u16, u32, u8, u8, u8, u8, u8);
@@ -19,6 +21,8 @@ pub(crate) struct ClassDef {
     pub weapons: &'static [Weapon],
     /// The sheath state the hero fights in: 1 melee, 2 ranged.
     pub sheath: u8,
+    /// Its guard against direct blows: the Warrior's block, the Rogue's dodge.
+    pub guard: Guard,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1027,6 +1031,10 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 7483, 2, 7, 1, 13, 3), (1, 1706, 4, 6, 1, 14, 4)],
         sheath: 1,
+        guard: Guard::Block {
+            chance: 0.25,
+            keep: 0.35,
+        },
     },
     ClassDef {
         id: 2,
@@ -1049,6 +1057,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 8011, 2, 4, 2, 13, 3), (1, 1705, 4, 6, 1, 14, 4)],
         sheath: 1,
+        guard: Guard::None,
     },
     ClassDef {
         id: 3,
@@ -1072,6 +1081,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 7480, 2, 6, 1, 17, 2), (2, 6235, 2, 2, 2, 15, 0)],
         sheath: 2,
+        guard: Guard::None,
     },
     ClassDef {
         id: 4,
@@ -1093,6 +1103,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 7492, 2, 7, 1, 13, 3), (1, 6443, 2, 15, 1, 13, 3)],
         sheath: 1,
+        guard: Guard::Dodge { chance: 0.18 },
     },
     ClassDef {
         id: 5,
@@ -1116,6 +1127,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 1926, 2, 10, 2, 17, 2)],
         sheath: 1,
+        guard: Guard::None,
     },
     ClassDef {
         id: 7,
@@ -1138,6 +1150,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 7477, 2, 4, 2, 13, 3), (1, 1705, 4, 6, 1, 14, 4)],
         sheath: 1,
+        guard: Guard::None,
     },
     ClassDef {
         id: 8,
@@ -1165,6 +1178,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 1927, 2, 10, 2, 17, 2)],
         sheath: 1,
+        guard: Guard::None,
     },
     ClassDef {
         id: 9,
@@ -1189,6 +1203,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 5542, 2, 10, 2, 17, 2)],
         sheath: 1,
+        guard: Guard::None,
     },
     ClassDef {
         id: 11,
@@ -1212,6 +1227,7 @@ pub(crate) static CLASSES: &[ClassDef] = &[
         ],
         weapons: &[(0, 22391, 2, 10, 2, 17, 2)],
         sheath: 1,
+        guard: Guard::None,
     },
 ];
 

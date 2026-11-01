@@ -20,6 +20,7 @@ mod framecap;
 mod frametime;
 mod globe;
 mod grade;
+mod guard;
 #[cfg(target_os = "android")]
 mod graphics;
 mod hero;
@@ -364,6 +365,10 @@ pub(super) struct Run {
     mobile: mobility::MobilityState,
     /// The potion's cooldown left, in run seconds (`potion`).
     pub potion_cd: f32,
+    /// The last blow the class's guard turned (`guard`) and the run time it did, for the
+    /// counterattack skills (read from Task B3 on).
+    #[allow(dead_code)]
+    pub guarded: Option<(guard::Guarded, f32)>,
     pub pending_levels: u32,
     pub bosses: u32,
     pub rings: u32,
@@ -414,6 +419,7 @@ impl Default for Run {
             heal_t: 0.0,
             mobile: mobility::MobilityState::default(),
             potion_cd: 0.0,
+            guarded: None,
             pending_levels: 0,
             bosses: 0,
             rings: 0,
