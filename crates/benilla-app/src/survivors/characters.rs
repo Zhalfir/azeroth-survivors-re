@@ -6,8 +6,10 @@
 //! The menu opens on **character select**: the list on the left where the create tower stands
 //! ([`super::menu::TowerRoot`], hidden), the zone list on the right with a mark per difficulty
 //! completed, a difficulty picker above Enter World. **Create** shows the tower again, with a
-//! generated name (there is no keyboard on a NativeActivity) and Create / Back where Enter World
-//! was ([`super::menu::EnterSlot`]). Delete takes a second tap to confirm.
+//! generated name and Create / Back where Enter World was ([`super::menu::EnterSlot`]). The name
+//! is a field: tapping it opens the soft keyboard (`Window::ime_enabled`, which winit 0.30 turns
+//! into `show_soft_input` on Android) with a caret; Enter, or a tap anywhere else, confirms
+//! ([`name_input`]). Delete takes a second tap to confirm.
 //!
 //! Files, through [`crate::local_state`] so the page's store answers too:
 //! `benilla-config/characters/index.txt` (the ids, in order, then `active <id>`) and
@@ -269,6 +271,15 @@ struct DifficultyBar;
 struct CreateBar;
 #[derive(Component)]
 struct NewName;
+/// The name field itself (the button around the name and caret).
+#[derive(Component)]
+struct NameCaretField;
+/// The name field's caret, blinking while the field has the keyboard.
+#[derive(Component)]
+struct NameCaret;
+/// The line under the name field: how to type, or how to confirm.
+#[derive(Component)]
+struct NameHint;
 #[derive(Component)]
 struct DeleteLabel;
 /// A locked difficulty button's second line: what opens it.
@@ -292,17 +303,86 @@ enum CharButton {
     Reroll,
     Confirm,
     Back,
+    /// The name field: a tap opens the keyboard.
+    NameField,
+}
+
+// --- Typing a name. ---
+
+/// The shortest and longest names, in letters.
+pub(super) const NAME_MIN: usize = 2;
+pub(super) const NAME_MAX: usize = 12;
+
+/// One edit to the name field.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum NameKey {
+    Char(char),
+    Backspace,
+    Done,
+}
+
+/// A letter a name may hold: Latin letters, accented ones included, which the UI font draws.
+fn name_letter(c: char) -> bool {
+    c.is_alphabetic() && (c.is_ascii() || ('\u{C0}'..='\u{17F}').contains(&c))
+}
+
+fn capitalised(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// The name after one key: letters only, at most [`NAME_MAX`], the first one capitalised.
+pub(super) fn name_input(name: &str, key: NameKey) -> String {
+    match key {
+        NameKey::Char(c) if name_letter(c) && name.chars().count() < NAME_MAX => {
+            let mut s = name.to_string();
+            s.push(c);
+            capitalised(&s)
+        }
+        NameKey::Char(_) => name.to_string(),
+        NameKey::Backspace => {
+            let mut s = name.to_string();
+            s.pop();
+            s
+        }
+        NameKey::Done => capitalised(name),
+    }
+}
+
+/// Whether a typed name may be kept: [`NAME_MIN`] to [`NAME_MAX`] letters.
+pub(super) fn name_valid(name: &str) -> bool {
+    let n = name.chars().count();
+    (NAME_MIN..=NAME_MAX).contains(&n) && name.chars().all(name_letter)
+}
+
+/// The name field has the keyboard; `before` is the name it had, restored if what was typed is
+/// too short when the field lets go.
+#[derive(Resource, Default)]
+pub(super) struct NameFocus {
+    pub on: bool,
+    before: String,
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Characters>()
         .init_resource::<Unlocks>()
+        .init_resource::<NameFocus>()
         .add_systems(Startup, spawn_ui.after(super::hud::setup_hud))
+        .add_systems(
+            PreUpdate,
+            swallow_keys.after(bevy::input::InputSystems),
+        )
         .add_systems(
             Update,
             (
                 load,
                 press,
+                type_name,
+                sync_ime,
+                name_field,
                 apply_active,
                 compute_unlocks,
                 rebuild_rows,
@@ -598,7 +678,44 @@ fn spawn_bars(commands: &mut Commands, f: &Handle<Font>) {
             Pickable::IGNORE,
         ))
         .with_children(|bar| {
-            bar.spawn((text(f, "", 24.0, GOLD), NewName));
+            // The name, a field: a tap opens the keyboard ([`type_name`]).
+            bar.spawn((
+                Button,
+                CharButton::NameField,
+                NameCaretField,
+                Node {
+                    min_width: Val::Px(280.0),
+                    height: Val::Px(48.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(2.0),
+                    padding: UiRect::horizontal(Val::Px(16.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(BUTTON),
+                BorderColor::all(EDGE),
+            ))
+            .with_children(|field| {
+                field.spawn((text(f, "", 24.0, GOLD), NewName));
+                // Always in the layout, so the name does not shift as it blinks.
+                field.spawn((
+                    NameCaret,
+                    Node {
+                        width: Val::Px(2.0),
+                        height: Val::Px(24.0),
+                        ..default()
+                    },
+                    BackgroundColor(GOLD),
+                    Visibility::Hidden,
+                    Pickable::IGNORE,
+                ));
+            });
+            bar.spawn((
+                text(f, "Tap the name to type your own", TEXT_FLOOR, DIM),
+                NameHint,
+            ));
             bar.spawn((
                 Node {
                     column_gap: Val::Px(8.0),
@@ -622,6 +739,7 @@ fn press(
     mut rng: ResMut<Rng>,
     creatures: Option<Res<crate::entities::Creatures>>,
     unlocks: Res<Unlocks>,
+    mut focus: ResMut<NameFocus>,
 ) {
     for (interaction, action, mut bg) in &mut buttons {
         if !matches!(action, CharButton::Pick(_) | CharButton::Difficulty(_)) {
@@ -636,7 +754,17 @@ fn press(
         if *action != CharButton::Delete {
             chars.delete_armed = None;
         }
+        // Any other button lets go of the name field, keeping what was typed if it is a name.
+        if *action != CharButton::NameField && focus.on {
+            release_name(&mut focus, &mut chars);
+        }
         match *action {
+            CharButton::NameField => {
+                if !focus.on {
+                    focus.on = true;
+                    focus.before = chars.new_name.clone();
+                }
+            }
             CharButton::Pick(id) => {
                 chars.active = Some(id);
                 save_index(&chars);
@@ -681,7 +809,7 @@ fn press(
                     continue;
                 }
                 let id = chars.list.iter().map(|c| c.id).max().unwrap_or(0) + 1;
-                if chars.new_name.is_empty() {
+                if !name_valid(&chars.new_name) {
                     chars.new_name = random_name(&mut rng, &chars.list);
                 }
                 let looks = &selection.looks;
@@ -714,6 +842,161 @@ fn press(
     if chars.mode == Mode::Create && chars.new_name.is_empty() && creatures.is_some() {
         chars.new_name = random_name(&mut rng, &chars.list);
         chars.version += 1;
+    }
+}
+
+/// The field lets go: a typed name is kept (capitalised), one too short goes back to the name
+/// it had.
+fn release_name(focus: &mut NameFocus, chars: &mut Characters) {
+    focus.on = false;
+    let typed = name_input(&chars.new_name, NameKey::Done);
+    let keep = if name_valid(&typed) {
+        typed
+    } else {
+        std::mem::take(&mut focus.before)
+    };
+    if chars.new_name != keep {
+        chars.new_name = keep;
+    }
+}
+
+/// While the name field has the keyboard, the game's key bindings (C, G, Enter...) stay quiet:
+/// the letters go to the name only ([`type_name`] reads the key messages, not this).
+fn swallow_keys(focus: Res<NameFocus>, mut keys: ResMut<ButtonInput<KeyCode>>) {
+    if focus.on {
+        keys.reset_all();
+    }
+}
+
+/// The keyboard's letters into the name: key presses (the soft keyboard on a NativeActivity
+/// sends key events) and IME commits. Enter, a tap outside the field, leaving Create or the menu,
+/// or the app going to the background lets go.
+#[allow(clippy::too_many_arguments)]
+fn type_name(
+    mut keyboard: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut ime: MessageReader<bevy::window::Ime>,
+    mut lifecycle: MessageReader<bevy::window::AppLifecycle>,
+    mut focus: ResMut<NameFocus>,
+    mut chars: ResMut<Characters>,
+    phase: Res<State<Phase>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    field: Query<&Interaction, With<NameCaretField>>,
+) {
+    use bevy::input::keyboard::Key;
+    let mut keys: Vec<NameKey> = Vec::new();
+    for k in keyboard.read() {
+        if !k.state.is_pressed() {
+            continue;
+        }
+        match &k.logical_key {
+            Key::Backspace => keys.push(NameKey::Backspace),
+            Key::Enter => keys.push(NameKey::Done),
+            Key::Character(s) => keys.extend(s.chars().map(NameKey::Char)),
+            _ => {}
+        }
+    }
+    for e in ime.read() {
+        if let bevy::window::Ime::Commit { value, .. } = e {
+            keys.extend(value.chars().map(NameKey::Char));
+        }
+    }
+    let backgrounded = lifecycle.read().any(|l| {
+        matches!(
+            l,
+            bevy::window::AppLifecycle::WillSuspend | bevy::window::AppLifecycle::Suspended
+        )
+    });
+    if !focus.on {
+        return;
+    }
+    let on_create = *phase.get() == Phase::Menu && chars.mode == Mode::Create;
+    let tapped = mouse.just_pressed(MouseButton::Left) || touches.any_just_pressed();
+    let on_field = field.iter().any(|i| *i == Interaction::Pressed);
+    if !on_create || backgrounded || (tapped && !on_field) {
+        release_name(&mut focus, &mut chars);
+        return;
+    }
+    let mut name = chars.new_name.clone();
+    for key in keys {
+        if key == NameKey::Done {
+            if name_valid(&name_input(&name, NameKey::Done)) {
+                if chars.new_name != name {
+                    chars.new_name = name;
+                }
+                release_name(&mut focus, &mut chars);
+                return;
+            }
+            continue;
+        }
+        name = name_input(&name, key);
+    }
+    if chars.new_name != name {
+        chars.new_name = name;
+    }
+}
+
+/// The soft keyboard follows the field: shown while it has focus, hidden otherwise. Written only
+/// on a change, so winit is asked once.
+fn sync_ime(
+    focus: Res<NameFocus>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+) {
+    for mut w in &mut windows {
+        if w.ime_enabled != focus.on {
+            w.ime_enabled = focus.on;
+        }
+    }
+}
+
+/// The field's name, its caret blinking at 1 Hz while it has the keyboard, its gold edge, and the
+/// hint under it. Each touched only on a change.
+#[allow(clippy::type_complexity)]
+fn name_field(
+    time: Res<Time<Real>>,
+    focus: Res<NameFocus>,
+    chars: Res<Characters>,
+    mut texts: ParamSet<(
+        Query<&mut Text, With<NewName>>,
+        Query<&mut Text, With<NameHint>>,
+    )>,
+    mut caret: Query<&mut Visibility, With<NameCaret>>,
+    mut edge: Query<&mut BorderColor, With<NameCaretField>>,
+) {
+    if let Ok(mut t) = texts.p0().single_mut() {
+        if t.0 != chars.new_name {
+            t.0 = chars.new_name.clone();
+        }
+    }
+    let lit = focus.on && time.elapsed_secs().fract() < 0.5;
+    let want = if lit {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut caret {
+        if *v != want {
+            *v = want;
+        }
+    }
+    if !focus.is_changed() {
+        return;
+    }
+    let border = BorderColor::all(if focus.on { GOLD } else { EDGE });
+    for mut b in &mut edge {
+        if *b != border {
+            *b = border;
+        }
+    }
+    let hint = if focus.on {
+        "Letters only · Enter to confirm"
+    } else {
+        "Tap the name to type your own"
+    };
+    if let Ok(mut t) = texts.p1().single_mut() {
+        if t.0 != hint {
+            t.0 = hint.to_string();
+        }
     }
 }
 
@@ -910,7 +1193,6 @@ fn refresh_labels(
     mut marks: Query<(&ZoneMark, &mut ImageNode)>,
     fresh: Query<(), (With<ZoneMark>, Added<super::hud::ArtDone>)>,
     mut texts: ParamSet<(
-        Query<&mut Text, With<NewName>>,
         Query<&mut Text, With<DeleteLabel>>,
         Query<&mut Text, With<CountLabel>>,
     )>,
@@ -991,15 +1273,12 @@ fn refresh_labels(
         }
     }
     if let Ok(mut t) = texts.p0().single_mut() {
-        t.0 = chars.new_name.clone();
-    }
-    if let Ok(mut t) = texts.p1().single_mut() {
         t.0 = match (chars.delete_armed, active) {
             (Some(_), Some(c)) => format!("Tap again: delete {}", c.name),
             _ => "Delete Character".into(),
         };
     }
-    if let Ok(mut t) = texts.p2().single_mut() {
+    if let Ok(mut t) = texts.p1().single_mut() {
         t.0 = format!("Characters {}/{}", chars.list.len(), MAX_CHARACTERS);
     }
     for (action, mut bg, mut border, children) in &mut difficulty {
@@ -1132,6 +1411,38 @@ fn record_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn typed(keys: &str) -> String {
+        keys.chars()
+            .fold(String::new(), |n, c| name_input(&n, NameKey::Char(c)))
+    }
+
+    #[test]
+    fn name_input_caps_and_limits() {
+        assert_eq!(typed("thrall"), "Thrall");
+        assert_eq!(name_input("", NameKey::Char('a')), "A");
+        // Twelve letters at most; the thirteenth is dropped.
+        assert_eq!(typed("abcdefghijklmnop"), "Abcdefghijkl");
+        assert_eq!(name_input("Abc", NameKey::Backspace), "Ab");
+        assert_eq!(name_input("", NameKey::Backspace), "");
+        assert_eq!(name_input("jaina", NameKey::Done), "Jaina");
+        assert_eq!(typed("élise"), "Élise");
+        assert!(name_valid("Jo"));
+        assert!(!name_valid("J"));
+        assert!(!name_valid(""));
+        assert!(name_valid("Abcdefghijkl"));
+        assert!(!name_valid("Abcdefghijklm"));
+    }
+
+    #[test]
+    fn name_input_rejects_non_letters() {
+        assert_eq!(typed("ar7thas"), "Arthas");
+        assert_eq!(typed("a b-c_d.1"), "Abcd");
+        assert_eq!(name_input("Jo", NameKey::Char('😀')), "Jo");
+        assert_eq!(name_input("Jo", NameKey::Char('漢')), "Jo");
+        assert!(!name_valid("Jo3"));
+        assert!(!name_valid("Jo Jo"));
+    }
 
     fn hero(completions: &[(usize, Difficulty)]) -> Character {
         Character {
