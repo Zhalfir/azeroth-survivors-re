@@ -57,8 +57,7 @@ None of this would exist without:
 - **Native Android build** with touch controls: a floating stick, an action-button arc for the right
   thumb, a free camera with a lock that keeps your view, an optional **stick on the right** for
   smaller screens, and the soft keyboard for naming characters.
-- **Characters and progression:** up to 8 named characters, generic talent trees (one point per
-  milestone, easy to balance) with each class's own Vanilla icons, and records that keep each
+- **Characters and progression:** up to 8 named characters, generic talent trees (easy to balance) with each class's own Vanilla icons, and records that keep each
   character's full name.
 - **Difficulties:** **Normal**, **Heroic** (clear every Normal zone) and **Mythic** (clear every
   Heroic zone, built as an achievement). Their health, damage and crowd multipliers ease in over
@@ -81,7 +80,6 @@ None of this would exist without:
   - SGSR upscaling;
   - a lean plugin set that disables what the survivors mode doesn't need;
   - animation and effect level of detail;
-  - thermal-aware tuning;
   - an on-device frame-time and GPU meter.
 - **Diagnostics:** a per-run combat log (`Diagnostics/runs/*.jsonl`) and crash reports, used to tune
   balance from real runs.
