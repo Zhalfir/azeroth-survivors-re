@@ -1,25 +1,148 @@
-<img width="1920" height="1080" alt="brag" src="https://github.com/user-attachments/assets/fa574bb6-7bd4-4e78-8b72-14c58e3c716e" />
-
 <div align="center">
 
-# Azeroth Survivors
+# Azeroth Survivors: Android edition
 
-**A free fan-made WoW roguelike by [Aethus](https://wow.aethus.pl/), run locally on a
-from-scratch WoW 1.12.1 client engine (Rust + [Bevy](https://bevy.org)).**
+**by [Zhalfir](https://github.com/Zhalfir)**
+
+**Android first. iPhone and iPad next.**
+
+A WoW-inspired survivors roguelike, rebuilt to run natively on Android tablets and phones, with
+touch controls, new modes and a lot of mobile performance work.
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue.svg)](LICENSE-MIT)
+![Platform: Android](https://img.shields.io/badge/platform-Android-3DDC84.svg)
+![Next: iOS](https://img.shields.io/badge/next-iPhone%20%2F%20iPad-lightgrey.svg)
 
 </div>
 
-> **Not an original project.** *Azeroth Survivors* is a free, fan-made WoW roguelike by
-> **Aethus** — play the original in the browser at **[wow.aethus.pl](https://wow.aethus.pl/)**
-> ([r/wowservers announcement](https://www.reddit.com/r/wowservers/comments/1x0yidl/azeroth_survivors_roguelike_wow_singleplayer_game/)
-> · [Discord](https://discord.gg/UzxaZuSAk)). This repository is a from-source local build of the
-> game, running on the [benilla](#how-its-built) / [wenilla](#how-its-built) engine, for personal use.
+> **Based on someone else's game.** *Azeroth Survivors* was designed and made by
+> **[Aethus](https://wow.aethus.pl/)**. Play the original in the browser at
+> **[wow.aethus.pl](https://wow.aethus.pl/)**. This fork builds on
+> [OutThisLife's local build](https://github.com/OutThisLife/azeroth-survivors-re) and the
+> [benilla](https://github.com/samwhosung/benilla) engine. Not affiliated with Blizzard Entertainment.
+>
+> **Where's the code?** The Android work lives on the
+> [`mobile-graphics`](https://github.com/Zhalfir/azeroth-survivors-re/tree/mobile-graphics) branch.
+> `main` follows the original local build and carries this README.
 
-Pick a class and a battleground, then survive: WASD to move, your abilities cast themselves,
-enemies swarm in waves, you level up and pick upgrades, and a boss shows up every couple of
-minutes. **No server, no login, no account** — fully offline and self-contained.
+## Why I'm doing this
+
+I loved *Azeroth Survivors*, and I wanted to play it on my tablet: couch-friendly, with my thumbs, at a
+steady frame rate, and fully offline. That turned into a full Android port, and then into adding the things I
+wished the game had: harder difficulties, characters that grow, secrets to hunt, and controls built
+for touch from the ground up.
+
+This is a personal, non-commercial project, and it's very much a work in progress. I play every
+build on a Samsung Galaxy Tab S9+ and tune it from real run logs.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/android/menu.jpg" alt="The Android menu: characters, talents, records, secrets and difficulty"></td>
+    <td width="50%"><img src="docs/screenshots/android/talents.jpg" alt="Talent trees with each class's own Vanilla icons and generic, easy-to-balance stats"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/android/secrets.jpg" alt="The Secrets page: 13 hidden races, each with a cryptic riddle"></td>
+    <td><img src="docs/screenshots/android/thumb-hud-mockup.png" alt="The thumb HUD: level-up choices wait by the right thumb while the run goes on"></td>
+  </tr>
+</table>
+
+
+## What's new in this edition
+
+- **Native Android build** with touch controls: a floating stick, an action-button arc for the right
+  thumb, a free camera with a lock that keeps your view, an optional **stick on the right** for
+  smaller screens, and the soft keyboard for naming characters.
+- **Characters and progression:** up to 8 named characters, generic talent trees (easy to balance) with each class's own Vanilla icons, and records that keep each
+  character's full name.
+- **Difficulties:** **Normal**, **Heroic** (clear every Normal zone) and **Mythic** (clear every
+  Heroic zone, built as an achievement). Their health, damage and crowd multipliers ease in over
+  each run.
+- **Demo mode:** a bot plays the run for you. It is also what runs the balance tests.
+- **2× game speed**, Vampire Survivors-style, from a button by the clock.
+- **The thumb HUD:** level-up choices wait in a compact stack by the right thumb **while the game
+  keeps running**. Tap once to preview, twice to take. Health and XP sit by the action buttons.
+- **Survival tools:**
+  - an on-demand **potion** with a cooldown that is weaker on harder difficulties;
+  - glowing red **health globes**;
+  - **Lifestealing** as a passive;
+  - **Warrior block** and **Rogue dodge** built in;
+  - a **Charge** that lunges without a target and stuns the pack it hits.
+- **Boss frames and nameplates**, with fewer adds while the final boss is up.
+- **13 secret races** with cryptic riddles, among them the Goblin, a Skeleton Paladin, the Murloc
+  and the Felguard. They are look-only, with Classic-style class limits.
+- **Mobile performance work:**
+  - a frame cap (30/60/uncapped);
+  - SGSR upscaling;
+  - a lean plugin set that disables what the survivors mode doesn't need;
+  - animation and effect level of detail;
+  - an on-device frame-time and GPU meter.
+- **Diagnostics:** a per-run combat log (`Diagnostics/runs/*.jsonl`) and crash reports, used to tune
+  balance from real runs.
+
+## Where it's going
+
+**Now: Android polish** (in progress)
+- [x] Native ARM64 build, touch controls, the thumb HUD with the level-up stack
+- [x] Difficulties, characters, talents, records, secret races, Demo mode, 2× speed
+- [x] Potion, health globes, Warrior block, Rogue dodge, a reworked Charge
+- [ ] Melee balance pass from run logs (Warrior and Rogue first)
+
+**Next: run variety**
+- [ ] Reroll, Skip and Banish on level-up
+- [ ] The **Soulstone**: a rare boss drop that revives you once
+- [ ] About 6 new Vanilla skills per class, plus **evolutions** (two maxed skills merge, such as Whirlwind and
+  Sweeping Strikes into Bladestorm)
+
+**Then: the late game**
+- [ ] **Ultimates** on each tree's 31-point capstone: one big button with a long cooldown
+- [ ] Gear and boss loot, including **secret weapons** such as the Ashbringer
+
+**After that: iPhone and iPad**
+- [ ] An iOS port of the same build (Metal, touch, safe areas), so the game runs on iPhone and iPad as well
+  as Android
+
+**Long term: my own game**
+- [ ] The engine and gameplay code are MIT/Apache licensed. The plan is to take what this project
+  teaches me into an original game with its own world, art and sound, built for mobile from day one.
+
+## Build and install on Android
+
+You need [Rust](https://rustup.rs/) with the `aarch64-linux-android` target,
+`cargo install cargo-ndk`, the Android SDK command-line tools with build-tools, a platform and the
+NDK (`ANDROID_HOME`), **JDK 17** and `adb`. You also need your own WoW 1.12.1 client's `Data`
+folder (see [The game data](#the-game-data-not-in-this-repo)).
+
+```bash
+git clone -b mobile-graphics https://github.com/Zhalfir/azeroth-survivors-re
+cd azeroth-survivors-re
+export JAVA_HOME=/path/to/jdk-17
+crates/survivors-android/android/build-apk.sh          # → azeroth-survivors.apk (the build is ~6 GB)
+crates/survivors-android/android/install.sh /path/to/WoW/Data   # installs + copies the MPQs to the device
+```
+
+`APK_FEATURES=dev` adds the on-device GPU frame meter. The data copy goes into the app's own
+folder (`/sdcard/Android/data/local.azeroth.survivors/files/Data`), so the app needs no storage
+permission.
+
+## Thank you
+
+None of this would exist without:
+
+- **[Aethus](https://wow.aethus.pl/)**, who designed and made *Azeroth Survivors*. Play the original at
+  [wow.aethus.pl](https://wow.aethus.pl/).
+- **[OutThisLife](https://github.com/OutThisLife/azeroth-survivors-re)**, for the from-source local
+  build this fork starts from.
+- **[samwhosung/benilla](https://github.com/samwhosung/benilla)**, the from-scratch WoW 1.12.1
+  client in Rust, and **[Arnesen/wenilla](https://github.com/Arnesen/wenilla)**, its web and realm fork.
+- **[Bevy](https://bevy.org)** and the Rust game-dev community.
+- **Blizzard Entertainment**, for World of Warcraft, the game all of this is a love letter to.
+
+
+---
+
+## The original local build
+
+Everything below describes OutThisLife's desktop and browser build that this fork started from. It still works on `main`.
 
 <table>
   <tr>
