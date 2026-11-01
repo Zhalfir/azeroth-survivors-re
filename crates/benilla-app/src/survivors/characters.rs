@@ -790,7 +790,7 @@ fn spawn_bars(commands: &mut Commands, f: &Handle<Font>) {
                         Pickable::IGNORE,
                     ))
                     .with_children(|sel| {
-                        sel.spawn((text(f, "", 24.0, GOLD), NewName, Pickable::IGNORE));
+                        sel.spawn((text(f, "", 24.0, GOLD), NewName));
                     });
                 // Always in the layout, so the name does not shift as it blinks.
                 field.spawn((
