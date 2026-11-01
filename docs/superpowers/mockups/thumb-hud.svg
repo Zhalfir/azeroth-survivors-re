@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" font-family="Helvetica, Arial, sans-serif">
+<rect width="1600" height="1000" rx="30" fill="#3b4a2a"/>
+<!-- top centre: clock, 2x, boss bar -->
+<text x="800" y="58" text-anchor="middle" font-size="40" fill="#f1efe8" font-weight="bold">08:42</text>
+<rect x="890" y="26" width="56" height="38" rx="6" fill="none" stroke="#fac775" stroke-width="3"/>
+<text x="918" y="54" text-anchor="middle" font-size="24" fill="#fac775">2×</text>
+<text x="800" y="92" text-anchor="middle" font-size="22" fill="#d3d1c7">Level 7 · 312 kills</text>
+<text x="800" y="128" text-anchor="middle" font-size="22" fill="#fac775">Hogger</text>
+<rect x="600" y="138" width="400" height="16" rx="6" fill="#501313"/><rect x="600" y="138" width="248" height="16" rx="6" fill="#e24b4a"/>
+<!-- top left skills, top right map -->
+<g><rect x="24" y="24" width="56" height="56" rx="8" fill="#993c1d"/><rect x="88" y="24" width="56" height="56" rx="8" fill="#185fa5"/><rect x="152" y="24" width="56" height="56" rx="8" fill="#3b6d11"/><rect x="216" y="24" width="56" height="56" rx="8" fill="#534ab7"/></g>
+<text x="24" y="108" font-size="20" fill="#d3d1c7">Your skills (read only)</text>
+<circle cx="1500" cy="100" r="76" fill="#27500a" stroke="#854f0b" stroke-width="5"/>
+<text x="1500" y="108" text-anchor="middle" font-size="22" fill="#d3d1c7">Map</text>
+<!-- hero and enemies -->
+<circle cx="700" cy="480" r="18" fill="#fac775"/>
+<circle cx="600" cy="400" r="11" fill="#e24b4a"/><circle cx="790" cy="560" r="11" fill="#e24b4a"/><circle cx="660" cy="350" r="11" fill="#e24b4a"/><circle cx="560" cy="580" r="11" fill="#e24b4a"/><circle cx="820" cy="420" r="11" fill="#e24b4a"/>
+<!-- stick zone bottom left -->
+<circle cx="170" cy="790" r="120" fill="none" stroke="#b4b2a9" stroke-width="3" stroke-dasharray="12 10"/>
+<circle cx="170" cy="790" r="44" fill="#5f5e5a"/>
+<text x="170" y="945" text-anchor="middle" font-size="22" fill="#d3d1c7">Stick (left thumb)</text>
+<!-- gesture bar -->
+<rect x="650" y="984" width="300" height="7" rx="3" fill="#888780"/>
+<text x="800" y="972" text-anchor="middle" font-size="18" fill="#888780">gesture bar kept clear</text>
+<!-- level-up stack right -->
+<g transform="translate(1090,270)">
+<text x="0" y="30" font-size="28" fill="#fac775" font-weight="bold">Level up</text>
+<rect x="128" y="6" width="50" height="32" rx="16" fill="#ba7517"/><text x="153" y="30" text-anchor="middle" font-size="22" fill="#412402" font-weight="bold">+2</text>
+<rect x="228" y="4" width="80" height="38" rx="6" fill="none" stroke="#854f0b" stroke-width="3"/><text x="268" y="31" text-anchor="middle" font-size="20" fill="#f1efe8">↻ 2</text>
+<rect x="316" y="4" width="80" height="38" rx="6" fill="none" stroke="#854f0b" stroke-width="3"/><text x="356" y="31" text-anchor="middle" font-size="20" fill="#f1efe8">Skip</text>
+<rect x="404" y="4" width="80" height="38" rx="6" fill="none" stroke="#854f0b" stroke-width="3"/><text x="444" y="31" text-anchor="middle" font-size="20" fill="#f1efe8">✕ 2</text>
+<g transform="translate(0,56)"><rect width="484" height="76" rx="10" fill="#1d1c18" stroke="#854f0b" stroke-width="3"/><rect x="12" y="10" width="56" height="56" rx="8" fill="#185fa5"/><text x="84" y="34" font-size="26" fill="#f1efe8" font-weight="bold">Whirlwind</text><text x="84" y="62" font-size="20" fill="#85b7eb">New · rare</text></g>
+<g transform="translate(0,142)"><rect width="484" height="76" rx="10" fill="#3a2a10" stroke="#fac775" stroke-width="5"/><rect x="12" y="10" width="56" height="56" rx="8" fill="#993556"/><text x="84" y="34" font-size="26" fill="#f1efe8" font-weight="bold">Lifestealing</text><text x="84" y="62" font-size="20" fill="#b4b2a9">Rank 1 → 2</text></g>
+<g transform="translate(0,228)"><rect width="484" height="76" rx="10" fill="#1d1c18" stroke="#854f0b" stroke-width="3"/><rect x="12" y="10" width="56" height="56" rx="8" fill="#993c1d"/><text x="84" y="34" font-size="26" fill="#f1efe8" font-weight="bold">Cleave</text><text x="84" y="62" font-size="20" fill="#b4b2a9">Rank 3 → 4</text></g>
+</g>
+<!-- tooltip to the left of the selected row -->
+<g transform="translate(750,400)">
+<rect width="320" height="150" rx="10" fill="#1d1c18" stroke="#fac775" stroke-width="3"/>
+<text x="18" y="38" font-size="26" fill="#fac775" font-weight="bold">Lifestealing</text>
+<text x="18" y="72" font-size="20" fill="#d3d1c7">Heals you for 6% of damage</text>
+<text x="18" y="98" font-size="20" fill="#d3d1c7">you deal (max 4% HP/s).</text>
+<text x="18" y="132" font-size="20" fill="#97c459">Tap again to take</text>
+</g>
+<!-- health and XP bottom right -->
+<g transform="translate(900,880)">
+<circle cx="26" cy="22" r="26" fill="#1d1c18" stroke="#fac775" stroke-width="3"/><text x="26" y="31" text-anchor="middle" font-size="24" fill="#fac775" font-weight="bold">7</text>
+<rect x="62" y="4" width="280" height="24" rx="6" fill="#173404"/><rect x="62" y="4" width="207" height="24" rx="6" fill="#639922"/>
+<text x="202" y="23" text-anchor="middle" font-size="18" fill="#f1efe8">612 / 830</text>
+<rect x="62" y="34" width="280" height="10" rx="4" fill="#26215c"/><rect x="62" y="34" width="112" height="10" rx="4" fill="#7f77dd"/>
+<text x="200" y="76" text-anchor="middle" font-size="18" fill="#d3d1c7">Health and XP</text>
+</g>
+<!-- action arc bottom right -->
+<circle cx="1490" cy="880" r="66" fill="#1d1c18" stroke="#fac775" stroke-width="6"/><text x="1490" y="894" text-anchor="middle" font-size="40" fill="#f1efe8" font-weight="bold">F</text>
+<text x="1490" y="975" text-anchor="middle" font-size="20" fill="#d3d1c7">Charge (ready)</text>
+<circle cx="1340" cy="830" r="56" fill="#444441" stroke="#854f0b" stroke-width="4"/><text x="1340" y="842" text-anchor="middle" font-size="32" fill="#b4b2a9">42</text>
+<text x="1340" y="915" text-anchor="middle" font-size="20" fill="#d3d1c7">Potion Q</text>
+<circle cx="1480" cy="715" r="56" fill="#1d1c18" stroke="#534ab7" stroke-width="4"/><text x="1480" y="728" text-anchor="middle" font-size="36" fill="#888780">R</text>
+<text x="1480" y="650" text-anchor="middle" font-size="20" fill="#d3d1c7">Ultimate (locked)</text>
+</svg>

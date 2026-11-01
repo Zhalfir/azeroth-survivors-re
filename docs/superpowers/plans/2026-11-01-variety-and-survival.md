@@ -196,6 +196,47 @@ The cluster anchors to the corner (`right`/`bottom` offsets, not absolute x/y), 
 - [ ] Step 2: implement, loaded once when the archives mount, as a resource.
 - [ ] Step 3: commit.
 
+### Task A11: Thumb HUD (level-up stack, health bottom-right) and keyboard fixes
+
+The user approved the mockup on 2026-11-01: `docs/superpowers/mockups/thumb-hud.png` (source `thumb-hud.svg`). The level-up choices no longer take over the screen. **The game keeps running at full speed** (the user's choice) while they wait.
+
+**Files:** `cards.rs` and `hud.rs` (replace the full-screen card screen and the `Phase::LevelUp` pause), `mod.rs` (phase and time), `touch.rs` (taps on the stack), `settings.rs`/`StickSide` (mirroring), `auto.rs` (the bot picks from the stack), and `characters.rs` (keyboard fixes).
+
+**Layout** (anchored to the action side; Stick: Right mirrors it):
+- **Stack:** a header row reading "Level up" with a pending badge "+N" when N > 1, plus Reroll/Skip/Banish chips (placeholders until B1, so hide them until then). Below it, three rows each 44 units tall and about 200 units wide, with an icon, the name, and a rarity- or rank-coloured sub line. The stack's bottom sits above the action arc.
+- **Tooltip:** opens beside the selected row, towards the screen centre, with the full description and "Tap again to take".
+- **Health and XP:** a level circle, the HP bar with "hp / max" and the XP bar, bottom-right, left of the action arc. They replace the current HP/XP position. Updates happen on change only.
+- **Action arc:** F (bottom-right), Q (left of F), and a slot for R above F (hidden until Phase C).
+- **The gesture-bar strip stays clear.**
+
+**Behaviour:**
+- Pending level-ups queue in `run.pending_levels`. The stack shows while that count is above 0, and the game does **not** pause.
+- Tap a row to select it (it highlights and the tooltip opens). Tap it again to take it. Tapping elsewhere, or after 4 s, deselects it.
+- Keys: 1, 2 and 3 select, the same key again (or Enter) takes, and Escape deselects. Pad: D-pad and A.
+- While a stack is open, movement and abilities continue. Boss chests also offer through the stack (gold header "Chest").
+- Taking a choice deals the next pending set at once, with a short slide-in of about 0.15 s.
+- The bot picks through the same path.
+
+**Keyboard fixes from the tablet test:**
+- Tapping the name field selects it all, so the first letter replaces the random name.
+- While the keyboard is up, the field moves to the top centre (above the soft keyboard), and it moves back on close.
+- The Android Enter key (`KeyCode::Enter` / `NumpadEnter` / `Key::Enter`) confirms and closes.
+- Tapping the field while it is focused with the keyboard hidden re-shows the keyboard (toggle `ime_enabled` off for one frame, then on).
+- The field must not overlap the race/class label: move the label above the field.
+
+**Tests:**
+- `stack_shows_while_pending_and_game_runs`
+- `second_tap_takes_first_tap_selects`
+- `deselect_after_timeout`
+- `pending_badge_counts`
+- `name_field_select_all_on_focus`
+
+- [ ] Step 1: write the tests.
+- [ ] Step 2: implement the stack and remove the full-screen card screen.
+- [ ] Step 3: health and XP, and the action arc.
+- [ ] Step 4: keyboard fixes.
+- [ ] Step 5: commit.
+
 ### Task A10: Phase A check, balance pass and APK
 
 - [ ] One `cargo ndk check`, then the B0001 scan, then the focused tests.
