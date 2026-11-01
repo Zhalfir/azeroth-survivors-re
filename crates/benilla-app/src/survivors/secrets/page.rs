@@ -14,12 +14,15 @@
 //! render-layer and material plumbing in the engine's entity pipeline.
 //!
 //! The grid is 5 cards wide on the tablet's ~1230-unit-wide canvas, 4 (or 3) when narrower, and
-//! scrolls (`Overflow::scroll_y`) by wheel, by touch drag and by moving the focus.
+//! scrolls (`Overflow::scroll_y`) by wheel, by touch drag and by moving the focus. A card is as
+//! tall as its content (a row as its tallest card), so a riddle sits right under its "???"; a
+//! "more" hint with a down chevron shows under the grid while rows remain below.
 
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::touch::Touches;
 use bevy::prelude::*;
-use bevy::ui::UiGlobalTransform;
+use bevy::math::Rot2;
+use bevy::ui::{UiGlobalTransform, UiTransform};
 use bevy::window::PrimaryWindow;
 
 use super::{def, Progress, SecretRace};
@@ -41,9 +44,8 @@ const BUTTON_HOT: Color = Color::srgba(0.34, 0.22, 0.06, 0.95);
 const SILHOUETTE: Color = Color::srgb(0.09, 0.075, 0.06);
 const RIBBON: Color = Color::srgb(0.7, 0.08, 0.04);
 
-/// A card, UI units (768 to the screen's height).
+/// A card's width, UI units (768 to the screen's height); its height follows its content.
 const CARD_W: f32 = 220.0;
-const CARD_H: f32 = 258.0;
 const GAP: f32 = 12.0;
 /// The page's side gutter.
 const SIDE: f32 = 16.0;
@@ -156,6 +158,9 @@ struct Card(usize);
 struct OpenButton;
 #[derive(Component)]
 struct OpenLabel;
+/// The "more" hint under the grid, shown while rows remain below.
+#[derive(Component)]
+struct MoreHint;
 
 #[derive(Component, Clone, Copy, PartialEq)]
 enum PageButton {
@@ -276,6 +281,39 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(En
                 },
                 ScrollPosition::default(),
             ));
+            // Its place always kept, so the grid and Back never jump as it comes and goes.
+            root.spawn((
+                MoreHint,
+                Node {
+                    height: Val::Px(18.0),
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Visibility::Hidden,
+                Pickable::IGNORE,
+            ))
+            .with_children(|h| {
+                // A chevron: a square's two lower edges, turned a quarter (the UI font has no ▼).
+                h.spawn((
+                    Node {
+                        width: Val::Px(9.0),
+                        height: Val::Px(9.0),
+                        margin: UiRect::bottom(Val::Px(5.0)),
+                        border: UiRect {
+                            right: Val::Px(2.0),
+                            bottom: Val::Px(2.0),
+                            ..default()
+                        },
+                        ..default()
+                    },
+                    BorderColor::all(PALE_GOLD),
+                    UiTransform::from_rotation(Rot2::degrees(45.0)),
+                    Pickable::IGNORE,
+                ));
+                h.spawn(text(f, "more", TEXT_FLOOR, PALE_GOLD));
+            });
             button(root, f, PageButton::Close, "Back");
         });
     // Its button, in the character screen's left column, under Records.
@@ -467,7 +505,6 @@ fn card(g: &mut ChildSpawnerCommands, f: &Handle<Font>, i: usize, e: &Entry, new
         Card(i),
         Node {
             width: Val::Px(CARD_W),
-            height: Val::Px(CARD_H),
             flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
@@ -697,7 +734,9 @@ fn scroll(
     scale: Res<UiScale>,
     windows: Query<&Window, With<PrimaryWindow>>,
     buttons: Query<(&PageButton, &ComputedNode, &UiGlobalTransform)>,
+    cards: Query<(&Card, &ComputedNode)>,
     mut grid: Query<(&ComputedNode, &mut ScrollPosition), With<Grid>>,
+    mut more: Query<&mut Visibility, With<MoreHint>>,
 ) {
     let mut dy = 0.0;
     for ev in wheel.read() {
@@ -734,17 +773,37 @@ fn scroll(
     let mut y = pos.0.y + dy;
     if page.reveal_focus && view > 0.0 {
         page.reveal_focus = false;
-        let row = (page.focus / page.cols.max(1)) as f32;
-        let top = row * (CARD_H + GAP);
+        // Rows are as tall as their tallest card: each row's height from the laid-out cards.
+        let cols = page.cols.max(1);
+        let mut rows: Vec<f32> = Vec::new();
+        for (card, n) in &cards {
+            let r = card.0 / cols;
+            if rows.len() <= r {
+                rows.resize(r + 1, 0.0);
+            }
+            rows[r] = rows[r].max(n.size.y * n.inverse_scale_factor);
+        }
+        let row = page.focus / cols;
+        let top: f32 = rows.iter().take(row).map(|h| h + GAP).sum();
+        let height = rows.get(row).copied().unwrap_or(0.0);
         if top < y {
             y = top;
-        } else if top + CARD_H > y + view {
-            y = top + CARD_H - view;
+        } else if top + height > y + view {
+            y = top + height - view;
         }
     }
     let y = y.clamp(0.0, max);
     if pos.0.y != y {
         pos.0.y = y;
+    }
+    // "more" while there is more than a hair left to scroll.
+    let want = if max - y > 2.0 {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut v in &mut more {
+        v.set_if_neq(want);
     }
 }
 

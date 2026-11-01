@@ -739,9 +739,16 @@ fn zone_row(
                 abs(1.0, -20.0, -6.0, ROW_W + 20.0, ROW_H + 12.0),
             ));
         }
+        // The name keeps clear of the completion marks at the row's right end.
         outlined_text(
             b,
-            abs(1.0, 0.0, 1.0, ROW_W, 16.0),
+            abs(
+                1.0,
+                0.0,
+                1.0,
+                ROW_W - super::characters::ZONE_MARKS_W,
+                16.0,
+            ),
             (),
             (),
             GlueText {
@@ -758,9 +765,10 @@ fn zone_row(
         } else {
             format!("Level {lo}-{hi}")
         };
+        // A step under the marks' foot (18), so the two never touch.
         outlined_text(
             b,
-            abs(1.0, 0.0, 18.0, ROW_W, 15.0),
+            abs(1.0, 0.0, 19.0, ROW_W, 15.0),
             (),
             (),
             GlueText {

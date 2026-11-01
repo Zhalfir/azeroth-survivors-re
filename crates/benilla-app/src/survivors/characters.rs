@@ -46,6 +46,15 @@ const ICON_CROP: [f32; 4] = [0.07, 0.93, 0.07, 0.93];
 const PICKED: Color = Color::srgba(0.45, 0.3, 0.05, 0.95);
 /// A zone row's completion mark, in UI units: the name line's height.
 const MARK: f32 = 18.0;
+/// The three marks' width at a zone row's right end (3 px apart, 2 in from the edge): the row's
+/// text keeps clear of it (`super::menu`).
+pub(super) const ZONE_MARKS_W: f32 = MARK * 3.0 + 3.0 * 2.0 + 2.0;
+/// A tapped locked difficulty: the button shakes ±4 units for a quarter second, and its red
+/// reason burns brighter for a second.
+const SHAKE_SECS: f32 = 0.25;
+const SHAKE_UNITS: f32 = 4.0;
+const REASON_FLASH_SECS: f32 = 1.0;
+const LOCKED_REASON_BRIGHT: Color = Color::srgb(1.0, 0.7, 0.62);
 /// A locked difficulty's label, and the line under it saying what opens it (WoW's red for a
 /// requirement not met, lifted to read on the dark button).
 const LOCKED_LABEL: Color = Color::srgb(0.72, 0.68, 0.6);
@@ -287,6 +296,21 @@ struct DeleteLabel;
 struct LockReason;
 #[derive(Component)]
 struct CountLabel;
+/// The Quit button's place, at the foot of the left column under Secrets.
+#[derive(Component)]
+struct QuitSlot;
+
+/// The locked difficulty last tapped and the seconds since, while its feedback plays.
+#[derive(Resource, Default)]
+struct LockedTap(Option<(Difficulty, f32)>);
+
+/// The shake's offset, in UI units, `t` seconds after the tap: a fading wobble, still at the end.
+pub(super) fn shake_offset(t: f32) -> f32 {
+    if !(0.0..SHAKE_SECS).contains(&t) {
+        return 0.0;
+    }
+    SHAKE_UNITS * (1.0 - t / SHAKE_SECS) * (std::f32::consts::TAU * 12.0 * t).sin()
+}
 /// A zone row's mark for one difficulty: gold once completed.
 #[derive(Component)]
 struct ZoneMark(usize, Difficulty);
@@ -305,6 +329,8 @@ enum CharButton {
     Back,
     /// The name field: a tap opens the keyboard.
     NameField,
+    /// Leaves the game.
+    Quit,
 }
 
 // --- Typing a name. ---
@@ -370,6 +396,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Characters>()
         .init_resource::<Unlocks>()
         .init_resource::<NameFocus>()
+        .init_resource::<LockedTap>()
         .add_systems(Startup, spawn_ui.after(super::hud::setup_hud))
         .add_systems(
             PreUpdate,
@@ -389,6 +416,7 @@ pub(super) fn plugin(app: &mut App) {
                 show,
                 mark_zones,
                 refresh_labels,
+                locked_feedback,
             )
                 .chain(),
         )
@@ -560,6 +588,29 @@ pub(super) fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>) {
             col.spawn((LeftSlot::Talents, Node::default(), Pickable::IGNORE));
             col.spawn((LeftSlot::Records, Node::default(), Pickable::IGNORE));
             col.spawn((LeftSlot::Secrets, Node::default(), Pickable::IGNORE));
+            // Quit, last: a tablet has no other way out but the system's.
+            col.spawn((
+                QuitSlot,
+                Node {
+                    width: Val::Px(236.0),
+                    margin: UiRect::top(Val::Px(8.0)),
+                    display: Display::None,
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|c| {
+                c.spawn((
+                    Button,
+                    CharButton::Quit,
+                    button_node(236.0, 44.0),
+                    BackgroundColor(BUTTON),
+                    BorderColor::all(EDGE),
+                ))
+                .with_children(|b| {
+                    b.spawn(text(f, "Quit", 18.0, Color::WHITE));
+                });
+            });
         });
     spawn_bars(&mut commands, f);
 }
@@ -740,6 +791,8 @@ fn press(
     creatures: Option<Res<crate::entities::Creatures>>,
     unlocks: Res<Unlocks>,
     mut focus: ResMut<NameFocus>,
+    mut locked: ResMut<LockedTap>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for (interaction, action, mut bg) in &mut buttons {
         if !matches!(action, CharButton::Pick(_) | CharButton::Difficulty(_)) {
@@ -790,7 +843,13 @@ fn press(
                     chars.delete_armed = Some(id);
                 }
             }
-            CharButton::Difficulty(d) if !unlocks.difficulty(selection.map, d) => {}
+            // Locked: the button shakes and says again what opens it ([`locked_feedback`]).
+            CharButton::Difficulty(d) if !unlocks.difficulty(selection.map, d) => {
+                locked.0 = Some((d, 0.0));
+            }
+            CharButton::Quit => {
+                exit.write(AppExit::Success);
+            }
             CharButton::Difficulty(d) => {
                 selection.difficulty = d;
                 selection.version += 1;
@@ -1114,6 +1173,7 @@ fn show(
         Query<&mut Node, With<CreateBar>>,
         Query<&mut Node, With<TowerRoot>>,
         Query<&mut Node, With<EnterSlot>>,
+        Query<&mut Node, With<QuitSlot>>,
     )>,
 ) {
     let menu = *phase.get() == Phase::Menu;
@@ -1140,6 +1200,9 @@ fn show(
     }
     for n in &mut panels.p4() {
         set(n, !create);
+    }
+    for n in &mut panels.p5() {
+        set(n, select);
     }
 }
 
@@ -1312,6 +1375,46 @@ fn refresh_labels(
     }
 }
 
+/// A tapped locked difficulty: its button shakes, and its reason line burns brighter, then both
+/// settle. Touches the button and the line only while the feedback plays.
+fn locked_feedback(
+    time: Res<Time<Real>>,
+    mut locked: ResMut<LockedTap>,
+    mut buttons: Query<(&CharButton, &mut Node, &Children), Without<LockReason>>,
+    mut reasons: Query<&mut TextColor, With<LockReason>>,
+) {
+    let Some((tapped, t)) = locked.0 else { return };
+    let t = t + time.delta_secs();
+    let done = t >= REASON_FLASH_SECS;
+    locked.0 = (!done).then_some((tapped, t));
+    for (action, mut node, children) in &mut buttons {
+        let CharButton::Difficulty(d) = *action else {
+            continue;
+        };
+        let offset = if d == tapped && !done {
+            shake_offset(t)
+        } else {
+            0.0
+        };
+        let left = Val::Px(offset);
+        if node.left != left {
+            node.left = left;
+        }
+        let color = if d == tapped && !done {
+            LOCKED_REASON_BRIGHT
+        } else {
+            LOCKED_REASON
+        };
+        for child in children.iter() {
+            if let Ok(mut c) = reasons.get_mut(child) {
+                if c.0 != color {
+                    c.0 = color;
+                }
+            }
+        }
+    }
+}
+
 /// The active character's unlocks; a pick that is no longer open falls back to what is: the
 /// furthest open zone, Normal.
 fn compute_unlocks(
@@ -1411,6 +1514,18 @@ fn record_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locked_shake_wobbles_then_settles() {
+        assert_eq!(shake_offset(0.0), 0.0);
+        let peak = (0..250)
+            .map(|i| shake_offset(i as f32 * 0.001).abs())
+            .fold(0.0, f32::max);
+        assert!(peak > 2.0 && peak <= SHAKE_UNITS, "{peak}");
+        assert_eq!(shake_offset(SHAKE_SECS), 0.0);
+        assert_eq!(shake_offset(0.6), 0.0);
+        assert_eq!(shake_offset(-0.1), 0.0);
+    }
 
     fn typed(keys: &str) -> String {
         keys.chars()
