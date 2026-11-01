@@ -1506,10 +1506,9 @@ pub(super) fn fill_icons(
         let handle = match cache.get(&icon.0) {
             Some(h) => Some(h.clone()),
             None => {
-                let path = spells
-                    .catalog
-                    .get(icon.0)
-                    .and_then(|d| d.icon.clone())
+                let path = super::potion::icon_override(icon.0)
+                    .map(String::from)
+                    .or_else(|| spells.catalog.get(icon.0).and_then(|d| d.icon.clone()))
                     .unwrap_or_else(|| "Interface\\Icons\\INV_Misc_QuestionMark".into());
                 let h = assets.sprite_texture(&format!("{path}.blp"), &mut images);
                 if let Some(h) = &h {

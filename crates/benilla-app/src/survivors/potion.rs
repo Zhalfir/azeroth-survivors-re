@@ -14,6 +14,16 @@ pub(super) const POTION_KEY: KeyCode = KeyCode::KeyQ;
 pub(super) const POTION_COOLDOWN: f32 = 60.0;
 /// Healing Potion: its visual and sound.
 pub(super) const POTION_SPELL: u32 = 441;
+/// The potion buttons' icon. Spell 441's own `SpellIconID` is 1, `Interface\Icons\Temp` (the
+/// client's placeholder, a man's face), so the buttons show the Healing Potion item's red flask
+/// (`INV_Potion_51`, in `interface.MPQ`) instead.
+pub(super) const POTION_ICON: &str = "Interface\\Icons\\INV_Potion_51";
+
+/// An icon to draw for `spell` in place of its `SpellIcon.dbc` one, for spells whose own icon is
+/// the placeholder.
+pub(super) fn icon_override(spell: u32) -> Option<&'static str> {
+    (spell == POTION_SPELL).then_some(POTION_ICON)
+}
 
 /// The share of the maximum health one drink heals.
 pub(super) fn potion_heal(d: Difficulty) -> f32 {
@@ -78,6 +88,12 @@ pub(super) fn drink_potion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn potion_icon_is_not_the_placeholder() {
+        assert_eq!(icon_override(POTION_SPELL), Some("Interface\\Icons\\INV_Potion_51"));
+        assert_eq!(icon_override(133), None);
+    }
 
     #[test]
     fn potion_heal_by_difficulty() {
