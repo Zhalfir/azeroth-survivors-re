@@ -12,7 +12,7 @@ use super::data::{self, EnemyDef};
 use super::guard;
 use super::hero::{self, Hero, HERO_RADIUS};
 use super::units::{self, flat, yaw_toward, Fx, Marks, UnitSpec, COLOR_HURT};
-use super::{Phase, Rng, Run, Selection};
+use super::{Rng, Run, Selection};
 use crate::creature_anim::{move_flags, MovementState};
 use crate::net::{FieldChanged, Guid, ObjectStore};
 
@@ -672,7 +672,6 @@ pub(super) fn collect_gems(
     mut commands: Commands,
     time: Res<Time>,
     mut run: ResMut<Run>,
-    mut next: ResMut<NextState<Phase>>,
     hero: Query<(Entity, &Transform), (With<Hero>, Without<Gem>)>,
     mut gems: Query<(Entity, &mut Transform, &mut Gem)>,
     mut secrets: MessageWriter<super::secrets::SecretEvent>,
@@ -711,6 +710,7 @@ pub(super) fn collect_gems(
                 }
                 GemKind::Chest => {
                     run.pending_levels += 1;
+                    run.pending_chests += 1;
                     run.banner = Some(("A treasure chest! Choose a power.".into(), 3.0));
                     super::combatlog::event(run.elapsed, "chest opened");
                     secrets.write(super::secrets::SecretEvent::Chest);
@@ -740,10 +740,9 @@ pub(super) fn collect_gems(
         let heal = 0.2 * stats.max_hp * run.pending_levels as f32;
         run.hp = (run.hp + heal).min(stats.max_hp);
         run.pending_levels = 0;
+        run.pending_chests = 0;
     }
-    if run.pending_levels > 0 {
-        next.set(Phase::LevelUp);
-    }
+    // Owed sets wait in the stack over the action thumb (`cards`); play goes on.
 }
 
 /// Pickups hang still: a wisp's own loop (its circling motes and their trails) stops on its first

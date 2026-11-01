@@ -2,7 +2,7 @@
 //! translated, in `PreUpdate` ahead of [`InputSystems`], into the mouse, keyboard and wheel input
 //! the desktop game already reads.
 //!
-//! - Off the battleground (menu, level-up cards, pause, results) the first finger is the mouse:
+//! - Off the battleground (menu, pause, results) the first finger is the mouse:
 //!   it moves the cursor and holds the left button, so glue clicks, bevy_ui buttons and the menu
 //!   hero's drag-to-turn work unchanged.
 //! - In play, a finger that lands on the stick's half (left by default, right as a setting:
@@ -12,6 +12,9 @@
 //!   F in the right thumb's cluster), C (lock / free the camera) and
 //!   Escape (pause), and the HUD's 2× toggle by the clock taps X (`super::speed`); two fingers pinch the camera in and out through the wheel. With the camera
 //!   free, a finger on the right half drags it around the hero instead, as a held right button.
+//! - The level-up stack (`super::cards`) waits in play over the action cluster: a row taps its
+//!   key (1, 2, 3: the first tap picks it out, the second takes it), the tooltip taps Enter (take),
+//!   and any other finger that lands lets the selection go. The stick keeps driving throughout.
 //!
 //! Each synthesized input is written both as its own message and as a [`WindowEvent`], as
 //! bevy_winit does: picking reads the latter.
@@ -43,26 +46,29 @@ const STICK_AIM: f32 = 160.0;
 const BUTTON_SIZE: f32 = 64.0;
 /// The play buttons: the key each taps, its icon (`None`: a spell's, the class's movement spell
 /// once learned or the potion's), and its centre's inset in UI units from the right edge and from
-/// the bottom (`true`) or top edge. Pause sits under the minimap, the rest by the right thumb,
-/// their feet over the gesture-bar band ([`SAFE_BOTTOM`]). The potion sits above-left of the
-/// mobility, ~105 units centre to centre, so neither's 0.75× hit circle reaches the other.
+/// the bottom (`true`) or top edge. Pause sits under the minimap, the rest in the action thumb's
+/// arc (`thumb-hud.png`), their feet over the gesture-bar band ([`SAFE_BOTTOM`]): F in the
+/// corner, Q left of it, C above Q. The arc keeps F's upper side free for Phase C's R (80 units,
+/// centre ~(72, SAFE_BOTTOM + 170)). Centres are ~100 units apart, so no 0.75× hit circle (48)
+/// reaches another. The health and XP panel sits left of Q (`hud::thumb_vitals`), the level-up
+/// stack above them all (`cards::STACK_BOTTOM`).
 const BUTTONS: [(KeyCode, Option<&str>, Vec2, bool); 4] = [
     (
         super::mobility::KEY,
         None,
-        Vec2::new(70.0, SAFE_BOTTOM + 108.0),
+        Vec2::new(72.0, SAFE_BOTTOM + 64.0),
         true,
     ),
     (
         super::potion::POTION_KEY,
         None,
-        Vec2::new(155.0, SAFE_BOTTOM + 169.0),
+        Vec2::new(172.0, SAFE_BOTTOM + 80.0),
         true,
     ),
     (
         KeyCode::KeyC,
         Some("Interface\\Icons\\Ability_Hunter_EagleEye"),
-        Vec2::new(165.0, SAFE_BOTTOM + 38.0),
+        Vec2::new(172.0, SAFE_BOTTOM + 180.0),
         true,
     ),
     (
@@ -163,6 +169,19 @@ type SpeedRects<'w, 's> = Query<
     With<super::speed::SpeedButton>,
 >;
 
+/// The level-up stack's rows and tooltip (`super::cards`), hit-tested like the 2× toggle.
+type StackRects<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static super::cards::StackRow>,
+        &'static ComputedNode,
+        &'static UiGlobalTransform,
+        &'static InheritedVisibility,
+    ),
+    Or<(With<super::cards::StackRow>, With<super::cards::StackTip>)>,
+>;
+
 #[allow(clippy::too_many_arguments)]
 fn translate_touches(
     mut touches: MessageReader<TouchInput>,
@@ -172,6 +191,7 @@ fn translate_touches(
     mut state: ResMut<TouchState>,
     play_buttons: ButtonRects,
     speed_buttons: SpeedRects,
+    mut stack: (StackRects, ResMut<super::cards::StackTaps>),
     mut windows: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut keys: MessageWriter<KeyboardInput>,
     mut buttons: MessageWriter<MouseButtonInput>,
@@ -213,6 +233,14 @@ fn translate_touches(
         let pos = touch.position;
         match touch.phase {
             TouchPhase::Started => {
+                // In play a finger off the level-up stack lets a picked-out row go
+                // (`cards::stack_input`); one on it taps the row's key or Enter.
+                let stack_key = playing
+                    .then(|| stack_at(pos, window.scale_factor(), &stack.0))
+                    .flatten();
+                if playing && stack_key.is_none() {
+                    stack.1.away = true;
+                }
                 let role = if !playing {
                     if state.fingers.values().any(|(r, _)| *r == Role::Mouse) {
                         Role::Ignored
@@ -221,7 +249,8 @@ fn translate_touches(
                         cursor_to = Some(pos);
                         Role::Mouse
                     }
-                } else if let Some(code) = button_at(pos, window.scale_factor(), &play_buttons)
+                } else if let Some(code) = stack_key
+                    .or_else(|| button_at(pos, window.scale_factor(), &play_buttons))
                     .or_else(|| speed_at(pos, window.scale_factor(), &speed_buttons))
                 {
                     state.tapped.push(code);
@@ -404,6 +433,26 @@ fn button_at(pos: Vec2, scale: f32, buttons: &ButtonRects) -> Option<KeyCode> {
         .iter()
         .find(|(_, node, tf, vis)| vis.get() && at.distance(tf.translation) < node.size().x * 0.75)
         .map(|(b, ..)| b.0)
+}
+
+/// The key a tap on the level-up stack stands for: a row's 1, 2 or 3, Enter for the tooltip. The
+/// whole box counts, with a little slop; the rows are 48 units tall and 6 apart, so a slop of 2
+/// keeps neighbours apart.
+fn stack_at(pos: Vec2, scale: f32, rects: &StackRects) -> Option<KeyCode> {
+    let at = pos * scale;
+    rects
+        .iter()
+        .find(|(_, node, tf, vis)| {
+            let half = node.size() * 0.5 + Vec2::splat(2.0 * scale);
+            vis.get() && node.size().x > 0.0 && (at - tf.translation).abs().cmple(half).all()
+        })
+        .map(|(row, ..)| match row.map(|r| r.index) {
+            Some(0) => KeyCode::Digit1,
+            Some(1) => KeyCode::Digit2,
+            Some(2) => KeyCode::Digit3,
+            Some(_) => KeyCode::Digit4,
+            None => KeyCode::Enter,
+        })
 }
 
 /// [`super::speed::KEY`] when `pos` (logical pixels) is on the HUD's 2× toggle: its whole box,

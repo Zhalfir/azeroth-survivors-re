@@ -1,10 +1,8 @@
 //! The mode's screens, in bevy_ui since FrameXML is off: the class and hero pick, the in-run HUD,
-//! the level-up cards, pause, and the results.
+//! the level-up stack's choices (`super::cards`), pause, and the results.
 
 use std::collections::HashMap;
 
-use benilla_ui::script::nameplate;
-use benilla_world::view::WorldCamera;
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
@@ -30,11 +28,16 @@ pub(super) const GOLD_TONE: Color = GOLD;
 /// report no window insets, and NativeActivity's `content_rect` is the whole screen when
 /// immersive. 36 units is ~48 dp on the Galaxy Tab (2.4 px a unit, ~1.8 px a dp).
 pub(super) const SAFE_BOTTOM: f32 = 36.0;
-/// The XP bar's foot: over the gesture bar's handle (a line ~10 dp up), not the whole band; it
-/// takes no taps.
-const XP_BOTTOM: f32 = 12.0;
-/// The XP bar's height: the reference's 13 and a little more, to read on a tablet.
-const XP_H: f32 = 17.0;
+/// The health and XP panel's inset from the action side's edge: left of the touch cluster's
+/// arc on Android (`super::touch`), in the corner elsewhere.
+#[cfg(target_os = "android")]
+const VITALS_SIDE: f32 = 214.0;
+#[cfg(not(target_os = "android"))]
+const VITALS_SIDE: f32 = 16.0;
+/// The health bar's and the XP bar's size, in UI units.
+const VITALS_W: f32 = 230.0;
+const HP_H: f32 = 22.0;
+const XP_H: f32 = 8.0;
 /// The smallest secondary text, in UI units: 13 units is 18 px on a 1080-line screen.
 pub(super) const TEXT_FLOOR: f32 = 13.0;
 
@@ -43,17 +46,11 @@ pub(super) struct MenuRoot;
 #[derive(Component)]
 pub(super) struct HudRoot;
 #[derive(Component)]
-pub(super) struct LevelUpRoot;
-#[derive(Component)]
 pub(super) struct PauseRoot;
 #[derive(Component)]
 pub(super) struct OverRoot;
 #[derive(Component)]
-pub(super) struct XpBar;
-#[derive(Component)]
 pub(super) struct XpFill;
-#[derive(Component)]
-pub(super) struct XpText;
 #[derive(Component)]
 pub(super) struct LevelText;
 #[derive(Component)]
@@ -63,16 +60,18 @@ pub(super) struct KillText;
 /// "Demo", under the clock while the bot plays ([`demo_label`]).
 #[derive(Component)]
 pub(super) struct DemoLabel;
+/// The health and XP panel by the action thumb: the level's circle, the health bar with its
+/// numbers, and the XP bar under it ([`thumb_vitals`]).
 #[derive(Component)]
-pub(super) struct HpFrame;
-#[derive(Component)]
-pub(super) struct HpBar;
-#[derive(Component)]
-pub(super) struct HpLevelSeat;
-#[derive(Component)]
-pub(super) struct HpLevel;
+pub(super) struct VitalsLevel;
 #[derive(Component)]
 pub(super) struct HpFill;
+#[derive(Component)]
+pub(super) struct HpText;
+/// A node anchored to the action side: its inset from that edge, mirrored with the stick
+/// ([`place_thumb`]).
+#[derive(Component)]
+pub(super) struct ThumbAnchor(pub(super) f32);
 #[derive(Component)]
 pub(super) struct ShieldFill;
 #[derive(Component)]
@@ -81,11 +80,6 @@ pub(super) struct BannerText;
 pub(super) struct AbilityRow;
 #[derive(Component)]
 pub(super) struct PassiveRow;
-#[derive(Component)]
-pub(super) struct OfferRow;
-/// The line under LEVEL UP: which level this is.
-#[derive(Component)]
-pub(super) struct LevelUpSub;
 
 /// A radial cooldown sweep over one ability icon: `sweep` is the remaining fraction
 /// (1.0 = just cast, 0.0 = ready), drawn by `ui_sweep.wgsl`.
@@ -260,10 +254,14 @@ pub(super) enum Choice {
     Heal,
 }
 
-/// The level-up cards on offer.
+/// The level-up choices on show in the stack (`super::cards`).
 #[derive(Resource, Default)]
 pub(super) struct Offer {
     choices: Vec<Choice>,
+    /// The set is a boss chest's: its header reads "Chest".
+    chest: bool,
+    /// Bumped on every deal and clear, so the stack rebuilds its rows once.
+    serial: u32,
 }
 
 impl Offer {
@@ -273,6 +271,20 @@ impl Offer {
 
     pub(super) fn choices(&self) -> &[Choice] {
         &self.choices
+    }
+
+    pub(super) fn is_chest(&self) -> bool {
+        self.chest
+    }
+
+    pub(super) fn serial(&self) -> u32 {
+        self.serial
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.choices.clear();
+        self.chest = false;
+        self.serial = self.serial.wrapping_add(1);
     }
 }
 
@@ -285,10 +297,6 @@ pub(super) struct HudFont(pub(super) Handle<Font>);
 pub(super) const PRESS: &str = "Press";
 #[cfg(target_os = "android")]
 pub(super) const PRESS: &str = "Tap";
-#[cfg(not(target_os = "android"))]
-const CARD_HINT: &str = "Click a card, or press 1, 2 or 3";
-#[cfg(target_os = "android")]
-const CARD_HINT: &str = "Tap a card";
 #[cfg(not(target_os = "android"))]
 const AGAIN_HINT: &str = "press Enter to play again";
 #[cfg(target_os = "android")]
@@ -323,6 +331,8 @@ pub(super) fn text_bundle(
     text(font, s, size, color)
 }
 
+/// Centred text for the touch overlay's key hints (`super::touch`, Android only).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub(super) fn centered_bundle(
     font: &Handle<Font>,
     s: impl Into<String>,
@@ -407,92 +417,154 @@ pub(super) fn setup_hud(
             Visibility::Hidden,
         ))
         .with_children(|root| {
-            // `MainMenuExpBar`, 1024×13 at the bottom centre. The reference stacks it on the
-            // 40-unit action bar; with no action bar here it rests just over the gesture bar's
-            // handle ([`XP_BOTTOM`]).
+            // The health and XP panel, by the action thumb (`thumb-hud.png`): the level in a gold
+            // ring, the health bar with "hp / max", the XP bar under it. Above the gesture bar.
+            let unpainted = || ImageNode {
+                color: Color::NONE,
+                ..default()
+            };
             root.spawn((
-                XpBar,
-                Interaction::default(),
+                ThumbAnchor(VITALS_SIDE),
                 Node {
                     position_type: PositionType::Absolute,
-                    left: Val::Percent(50.0),
-                    bottom: Val::Px(XP_BOTTOM),
-                    margin: UiRect::left(Val::Px(-512.0)),
-                    width: Val::Px(1024.0),
-                    height: Val::Px(XP_H),
+                    right: Val::Px(VITALS_SIDE),
+                    bottom: Val::Px(SAFE_BOTTOM + 4.0),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
             ))
-            .with_children(|bar| {
-                bar.spawn((
-                    XpFill,
-                    Node {
-                        width: Val::Percent(0.0),
-                        height: Val::Percent(100.0),
-                        ..default()
-                    },
-                    ImageNode {
-                        color: Color::NONE,
-                        ..default()
-                    },
-                    UiArt::tinted(
-                        "Interface\\TargetingFrame\\UI-StatusBar",
-                        Color::srgb(0.58, 0.0, 0.55),
-                    ),
-                ));
-                // `MainMenuXPBarTexture0`..`3`: the segment rules, 256×10 on the bar's top.
-                for (i, top) in [0.792_968_75, 0.542_968_75, 0.292_968_75, 0.042_968_75]
-                    .into_iter()
-                    .enumerate()
-                {
-                    bar.spawn((
+            .with_children(|panel| {
+                panel
+                    .spawn((
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(256.0 * i as f32),
-                            top: Val::Px(0.0),
-                            width: Val::Px(256.0),
-                            height: Val::Px(XP_H - 3.0),
+                            width: Val::Px(40.0),
+                            height: Val::Px(40.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(2.0)),
+                            border_radius: BorderRadius::MAX,
                             ..default()
                         },
-                        ImageNode {
-                            color: Color::NONE,
-                            ..default()
-                        },
-                        UiArt::crop(
-                            "Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf",
-                            [0.0, 1.0, top, top + 0.039_062_5],
-                        ),
-                    ));
-                }
-                // `MainMenuBarExpText`, `TextStatusBarText` centred one unit up, shown on hover.
-                bar.spawn(Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    top: Val::Px(-1.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|n| {
-                    n.spawn((
-                        XpText,
-                        Text::new(""),
-                        TextFont {
-                            font: number_font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        TextShadow {
-                            offset: Vec2::new(1.0, 1.0),
-                            color: Color::BLACK,
-                        },
-                        TextLayout::new(Justify::Center, LineBreak::NoWrap),
-                        Visibility::Hidden,
-                    ));
-                });
+                        BackgroundColor(Color::srgba(0.07, 0.065, 0.055, 0.9)),
+                        BorderColor::all(GOLD),
+                    ))
+                    .with_children(|c| {
+                        c.spawn((
+                            VitalsLevel,
+                            Text::new("1"),
+                            TextFont {
+                                font: f.clone(),
+                                font_size: 18.0,
+                                ..default()
+                            },
+                            TextColor(GOLD),
+                            TextShadow {
+                                offset: Vec2::splat(1.0),
+                                color: Color::BLACK,
+                            },
+                            TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                        ));
+                    });
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        col.spawn((
+                            Node {
+                                width: Val::Px(VITALS_W),
+                                height: Val::Px(HP_H),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                overflow: Overflow::clip(),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.05, 0.12, 0.02, 0.85)),
+                            BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.8)),
+                        ))
+                        .with_children(|bar| {
+                            bar.spawn((
+                                HpFill,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                unpainted(),
+                                UiArt::tinted(
+                                    "Interface\\TargetingFrame\\UI-StatusBar",
+                                    Color::srgb(0.1, 0.8, 0.1),
+                                ),
+                            ));
+                            bar.spawn((
+                                ShieldFill,
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    width: Val::Percent(0.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                unpainted(),
+                                UiArt::tinted(
+                                    "Interface\\TargetingFrame\\UI-StatusBar",
+                                    Color::srgba(0.85, 0.9, 1.0, 0.75),
+                                ),
+                            ));
+                            bar.spawn(Node {
+                                position_type: PositionType::Absolute,
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|n| {
+                                n.spawn((
+                                    HpText,
+                                    Text::new(""),
+                                    TextFont {
+                                        font: number_font.clone(),
+                                        font_size: 15.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::WHITE),
+                                    TextShadow {
+                                        offset: Vec2::new(1.0, 1.0),
+                                        color: Color::BLACK,
+                                    },
+                                    TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                                ));
+                            });
+                        });
+                        col.spawn((
+                            Node {
+                                width: Val::Px(VITALS_W),
+                                height: Val::Px(XP_H),
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
+                                overflow: Overflow::clip(),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.1, 0.08, 0.25, 0.85)),
+                        ))
+                        .with_children(|bar| {
+                            bar.spawn((
+                                XpFill,
+                                Node {
+                                    width: Val::Percent(0.0),
+                                    height: Val::Percent(100.0),
+                                    ..default()
+                                },
+                                unpainted(),
+                                UiArt::tinted(
+                                    "Interface\\TargetingFrame\\UI-StatusBar",
+                                    Color::srgb(0.58, 0.0, 0.55),
+                                ),
+                            ));
+                        });
+                    });
             });
             minimap::spawn_cluster(root, f, &map);
             // The mobility button: a 36-unit action slot in `UI-Quickslot2`, its key over it.
@@ -629,84 +701,6 @@ pub(super) fn setup_hud(
             .with_children(|n| {
                 n.spawn((BannerText, centered(f, "", 30.0, GOLD)));
             });
-            // The hero's health as a nameplate (`CGNamePlateFrame`): the bar under the border that
-            // caps it, the level in the border's seat; [`hero_plate`] sizes and seats it.
-            let absolute = || Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            };
-            let unpainted = || ImageNode {
-                color: Color::NONE,
-                ..default()
-            };
-            let [r, g, b, _] = crate::vplates::PLATE_FRIENDLY;
-            root.spawn((HpFrame, absolute(), Visibility::Hidden))
-                .with_children(|plate| {
-                    plate.spawn((HpBar, absolute())).with_children(|bar| {
-                        bar.spawn((
-                            HpFill,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            unpainted(),
-                            UiArt::tinted(nameplate::BAR_FILL_TEXTURE, Color::srgb(r, g, b)),
-                        ));
-                        bar.spawn((
-                            ShieldFill,
-                            Node {
-                                width: Val::Percent(0.0),
-                                height: Val::Percent(100.0),
-                                ..absolute()
-                            },
-                            unpainted(),
-                            UiArt::tinted(
-                                nameplate::BAR_FILL_TEXTURE,
-                                Color::srgba(0.85, 0.9, 1.0, 0.75),
-                            ),
-                        ));
-                    });
-                    plate.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..absolute()
-                        },
-                        unpainted(),
-                        UiArt::crop(nameplate::BORDER_TEXTURE, [0.0, 1.0, 0.0, 1.0]),
-                    ));
-                    let [r, g, b, _] = crate::vplates::CON_YELLOW;
-                    plate
-                        .spawn((
-                            HpLevelSeat,
-                            Node {
-                                width: Val::Px(0.0),
-                                height: Val::Px(0.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                overflow: Overflow::visible(),
-                                ..absolute()
-                            },
-                        ))
-                        .with_children(|seat| {
-                            seat.spawn((
-                                HpLevel,
-                                Text::new("1"),
-                                TextFont {
-                                    font: f.clone(),
-                                    font_size: 11.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(r, g, b)),
-                                TextShadow {
-                                    offset: Vec2::new(1.0, 1.0),
-                                    color: Color::BLACK,
-                                },
-                                TextLayout::new(Justify::Center, LineBreak::NoWrap),
-                            ));
-                        });
-                });
         });
     commands.insert_resource(map);
 
@@ -722,95 +716,6 @@ pub(super) fn setup_hud(
         GlobalZIndex(410),
         bevy::ui::FocusPolicy::Pass,
     ));
-
-    // --- Level up. ---
-    commands
-        .spawn((
-            LevelUpRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(18.0),
-                ..default()
-            },
-            // A dark vignette closing in on the cards, a slow golden light at its heart (the
-            // 1400-unit burst's radius over the 768-unit canvas).
-            MaterialNode(
-                fills.add(
-                    super::fill::FillMaterial::radial(
-                        Color::srgba(0.04, 0.025, 0.0, 0.72),
-                        Color::srgba(0.0, 0.0, 0.0, 0.9),
-                    )
-                    .with_glow(
-                        Color::srgba(1.0, 0.75, 0.25, 0.22),
-                        Vec2::splat(0.5),
-                        Vec2::splat(700.0 / 768.0),
-                    ),
-                ),
-            ),
-            GlobalZIndex(420),
-            Visibility::Hidden,
-            // The build's icons stay hoverable under the cards.
-            bevy::ui::FocusPolicy::Pass,
-        ))
-        .with_children(|root| {
-            // The slow golden burst behind everything.
-            root.spawn((
-                super::cards::Rays,
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Px(1400.0),
-                    height: Val::Px(1400.0),
-                    left: Val::Percent(50.0),
-                    top: Val::Percent(50.0),
-                    margin: UiRect::new(
-                        Val::Px(-700.0),
-                        Val::Px(0.0),
-                        Val::Px(-700.0),
-                        Val::Px(0.0),
-                    ),
-                    ..default()
-                },
-                BackgroundGradient(vec![Gradient::Conic(ConicGradient::new(
-                    UiPosition::CENTER,
-                    (0..24)
-                        .map(|i| {
-                            let a = i as f32 / 24.0 * std::f32::consts::TAU;
-                            let on = i % 2 == 0;
-                            AngularColorStop::new(
-                                if on {
-                                    Color::srgba(1.0, 0.8, 0.3, 0.07)
-                                } else {
-                                    Color::srgba(1.0, 0.8, 0.3, 0.0)
-                                },
-                                a,
-                            )
-                        })
-                        .collect(),
-                ))]),
-                UiTransform::default(),
-                bevy::ui::FocusPolicy::Pass,
-            ));
-            root.spawn(centered(f, "LEVEL UP", 52.0, GOLD));
-            root.spawn((
-                LevelUpSub,
-                centered(f, "Choose your power", 16.0, Color::srgb(0.85, 0.78, 0.6)),
-            ));
-            root.spawn((
-                OfferRow,
-                Node {
-                    column_gap: Val::Px(22.0),
-                    // Room for a hovered card's lift.
-                    margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(28.0), Val::Px(16.0)),
-                    ..default()
-                },
-            ));
-            root.spawn(centered(f, CARD_HINT, 14.0, DIM));
-        });
 
     // --- Pause. ---
     commands
@@ -1156,17 +1061,16 @@ fn choices_for(run: &Run, rng: &mut Rng) -> Vec<Choice> {
     out
 }
 
-pub(super) fn roll_offer(run: Res<Run>, mut rng: ResMut<Rng>, mut offer: ResMut<Offer>) {
-    offer.choices = choices_for(&run, &mut rng);
+/// Deal the next set: a chest's first while any is owed, then the levels'.
+pub(super) fn deal(run: &Run, rng: &mut Rng, offer: &mut Offer) {
+    offer.choices = choices_for(run, rng);
+    offer.chest = run.pending_chests > 0;
+    offer.serial = offer.serial.wrapping_add(1);
 }
 
-pub(super) fn pick(
-    i: usize,
-    run: &mut Run,
-    offer: &mut Offer,
-    rng: &mut Rng,
-    next: &mut NextState<Phase>,
-) {
+/// Take choice `i` of the set on show. The run never stops for it: the next set, if any is owed,
+/// is dealt at once, and the stack closes when none is.
+pub(super) fn pick(i: usize, run: &mut Run, offer: &mut Offer, rng: &mut Rng) {
     let Some(&choice) = offer.choices.get(i) else {
         return;
     };
@@ -1185,7 +1089,8 @@ pub(super) fn pick(
         ),
         Choice::Heal => "heal".to_string(),
     };
-    super::combatlog::event(run.elapsed, format!("level {}: {picked}", run.level));
+    let from = if offer.chest { "chest" } else { "level" };
+    super::combatlog::event(run.elapsed, format!("{from} {}: {picked}", run.level));
     let max_before = run.stats().max_hp;
     match choice {
         Choice::NewAbility(def) => run.abilities.push(Owned {
@@ -1204,12 +1109,14 @@ pub(super) fn pick(
         run.hp = (run.hp + max_after - max_before).min(max_after);
     }
     run.version += 1;
+    if offer.chest {
+        run.pending_chests = run.pending_chests.saturating_sub(1);
+    }
     run.pending_levels = run.pending_levels.saturating_sub(1);
     if run.pending_levels > 0 {
-        offer.choices = choices_for(run, rng);
+        deal(run, rng, offer);
     } else {
-        offer.choices.clear();
-        next.set(Phase::Playing);
+        offer.clear();
     }
 }
 
@@ -1282,6 +1189,7 @@ pub(super) fn demo_label(
 pub(super) fn keys(
     keys: Res<ButtonInput<KeyCode>>,
     phase: Res<State<Phase>>,
+    stack: Res<super::cards::Stack>,
     mut selection: ResMut<Selection>,
     mut run: ResMut<Run>,
     mut next: ResMut<NextState<Phase>>,
@@ -1299,7 +1207,10 @@ pub(super) fn keys(
             }
         }
         Phase::Playing => {
-            if keys.just_pressed(KeyCode::Escape) {
+            // With a level-up row picked out, Escape lets it go instead (`super::cards`). On a
+            // tablet Escape is the Menu button, which always pauses.
+            let deselects = !cfg!(target_os = "android") && stack.selected.is_some();
+            if keys.just_pressed(KeyCode::Escape) && !deselects {
                 next.set(Phase::Paused);
             }
         }
@@ -1308,7 +1219,6 @@ pub(super) fn keys(
                 next.set(Phase::Playing);
             }
         }
-        Phase::LevelUp => {}
         Phase::GameOver => {
             if keys.just_pressed(KeyCode::Enter) {
                 next.set(Phase::Menu);
@@ -1341,10 +1251,7 @@ pub(super) struct CardText {
     pub spell: u32,
     pub name: String,
     pub tag: String,
-    pub tag_color: Color,
     pub desc: String,
-    /// `(rank now, top rank)`, for the pips; `None` for the healthstone.
-    pub ranks: Option<(u8, u8)>,
 }
 
 pub(super) fn describe_card(
@@ -1352,7 +1259,6 @@ pub(super) fn describe_card(
     run: &Run,
     spells: Option<&crate::ui_action::Spells>,
 ) -> CardText {
-    let new = Color::srgb(0.3, 1.0, 0.3);
     match choice {
         Choice::NewAbility(def) => {
             let stats = run.stats();
@@ -1361,9 +1267,7 @@ pub(super) fn describe_card(
                 spell: def.spell,
                 name: spell_name(spells, def.spell, def.key),
                 tag: "New spell".into(),
-                tag_color: new,
                 desc: format!("{}.", ability_body(def, &c)),
-                ranks: Some((0, data::MAX_ABILITY_LEVEL)),
             }
         }
         Choice::Upgrade(k) => {
@@ -1404,18 +1308,14 @@ pub(super) fn describe_card(
                 spell: o.def.spell,
                 name: spell_name(spells, o.def.spell, o.def.key),
                 tag: format!("Rank {} » {next}", o.level),
-                tag_color: Color::WHITE,
                 desc: lines.join("\n"),
-                ranks: Some((o.level, data::MAX_ABILITY_LEVEL)),
             }
         }
         Choice::NewPassive(p) => CardText {
             spell: p.spell,
             name: p.name.into(),
             tag: "New talent".into(),
-            tag_color: new,
             desc: passive_text(p.stat, p.per_level),
-            ranks: Some((0, data::MAX_PASSIVE_LEVEL)),
         },
         Choice::UpPassive(k) => {
             let (p, level) = run.passives[k];
@@ -1427,24 +1327,27 @@ pub(super) fn describe_card(
                 spell: p.spell,
                 name: p.name.into(),
                 tag: format!("Rank {level} » {}", level + 1),
-                tag_color: Color::WHITE,
                 desc: format!(
                     "{}\n{} » {}",
                     stat_label(p.stat),
                     fmt(p.per_level * f32::from(level)),
                     fmt(p.per_level * f32::from(level + 1)),
                 ),
-                ranks: Some((level, data::MAX_PASSIVE_LEVEL)),
             }
         }
         Choice::Heal => CardText {
             spell: 5720,
             name: "Healthstone".into(),
             tag: "Restore".into(),
-            tag_color: Color::WHITE,
             desc: "Everything is mastered. Restores all health.".into(),
-            ranks: None,
         },
+    }
+}
+
+/// A text written only when it reads differently, so its layout is not redone every frame.
+fn set_text(t: &mut Mut<Text>, s: String) {
+    if t.0 != s {
+        t.0 = s;
     }
 }
 
@@ -1452,7 +1355,6 @@ pub(super) fn describe_card(
 pub(super) fn refresh_hud(
     mut commands: Commands,
     time: Res<Time>,
-    phase: Res<State<Phase>>,
     mut run: ResMut<Run>,
     selection: Res<Selection>,
     font: Res<HudFont>,
@@ -1463,33 +1365,21 @@ pub(super) fn refresh_hud(
         Query<&mut Text, With<BannerText>>,
         Query<&mut Text, With<OverTitle>>,
         Query<&mut Text, With<OverStats>>,
-        Query<&mut Text, With<XpText>>,
     )>,
-    mut xp_fill: Query<&mut Node, With<XpFill>>,
     rows: Query<(Entity, Has<AbilityRow>), Or<(With<AbilityRow>, With<PassiveRow>)>>,
     mut sweeps: ResMut<Assets<SweepUiMaterial>>,
     mut last_version: Local<Option<u32>>,
 ) {
-    let need = data::xp_to_next(run.level);
-    if let Ok(mut n) = xp_fill.single_mut() {
-        n.width = Val::Percent((run.xp / need * 100.0).clamp(0.0, 100.0));
-    }
-    if let Ok(mut t) = texts.p6().single_mut() {
-        let xp = format!("XP {} / {}", run.xp as u32, need as u32);
-        if **t != xp {
-            **t = xp;
-        }
-    }
     if let Ok(mut t) = texts.p0().single_mut() {
-        **t = format!("Level {}", run.level);
+        set_text(&mut t, format!("Level {}", run.level));
     }
     let secs = run.elapsed as u32;
     if let Ok(mut t) = texts.p1().single_mut() {
-        **t = format!("{:02}:{:02}", secs / 60, secs % 60);
+        set_text(&mut t, format!("{:02}:{:02}", secs / 60, secs % 60));
     }
     let kills = run.kills;
     if let Ok(mut t) = texts.p2().single_mut() {
-        **t = format!("Kills {kills}");
+        set_text(&mut t, format!("Kills {kills}"));
     }
     let banner = match run.banner.as_mut() {
         Some((msg, t)) => {
@@ -1505,12 +1395,6 @@ pub(super) fn refresh_hud(
     if banner.is_empty() {
         run.banner = None;
     }
-    // The picker owns the screen: an announcement waits until it closes.
-    let banner = if *phase.get() == Phase::LevelUp {
-        String::new()
-    } else {
-        banner
-    };
     if let Ok(mut t) = texts.p3().single_mut() {
         if **t != banner {
             **t = banner;
@@ -1523,7 +1407,7 @@ pub(super) fn refresh_hud(
     }
     .to_string();
     if let Ok(mut t) = texts.p4().single_mut() {
-        **t = title;
+        set_text(&mut t, title);
     }
     let summary = format!(
         "{} {} in {}   —   {AGAIN_HINT}",
@@ -1652,7 +1536,8 @@ pub(super) fn refresh_mobility(
 ) {
     let def = run.mobility();
     if let Ok(mut node) = slot.single_mut() {
-        let display = if def.is_some() {
+        // On a tablet the touch cluster's F is the one button (`super::touch`).
+        let display = if def.is_some() && !cfg!(target_os = "android") {
             Display::Flex
         } else {
             Display::None
@@ -1727,70 +1612,27 @@ pub(super) fn apply_ui_scale(
     }
 }
 
-/// Between the hero's feet and the top of its plate's bar, in gx units.
-const PLATE_FEET_GAP: f32 = 0.004;
-/// A couple of screen pixels lower than the gap alone sets it.
-const PLATE_NUDGE: f32 = 2.0;
-/// The hero's plate against an enemy's: half again as large, so it reads in a crowd on a tablet
-/// (the diagonal basis damps a large screen's plates).
-const HERO_PLATE_SCALE: f32 = 1.5;
-/// The level in the plate's seat never drops under this, in UI units.
-const HERO_LEVEL_MIN: f32 = TEXT_FLOOR + 2.0;
+fn set_width(n: &mut Mut<Node>, w: Val) {
+    if n.width != w {
+        n.width = w;
+    }
+}
 
-/// The hero's nameplate under its feet, sized from the screen diagonal as [`crate::vplates`]
-/// sizes a plate, outside the UI scale. The border's top half seats a name the hero has none of,
-/// so the plate rises until its bar sits just under the feet.
+/// The health and XP panel by the action thumb: fills, numbers and level, each written only on
+/// a change.
 #[allow(clippy::type_complexity)]
-pub(super) fn hero_plate(
+pub(super) fn thumb_vitals(
     run: Res<Run>,
-    ui_scale: Res<UiScale>,
-    hero: Query<&Transform, With<Hero>>,
-    cams: Query<(&Camera, &Transform), With<WorldCamera>>,
-    mut nodes: ParamSet<(
-        Query<(&mut Node, &mut Visibility), With<HpFrame>>,
-        Query<&mut Node, With<HpBar>>,
+    mut fills: ParamSet<(
         Query<&mut Node, With<HpFill>>,
         Query<&mut Node, With<ShieldFill>>,
-        Query<&mut Node, With<HpLevelSeat>>,
+        Query<&mut Node, With<XpFill>>,
     )>,
-    mut level: Query<(&mut Text, &mut TextFont), With<HpLevel>>,
+    mut texts: ParamSet<(
+        Query<&mut Text, With<HpText>>,
+        Query<&mut Text, With<VitalsLevel>>,
+    )>,
 ) {
-    use crate::vplates::{
-        gx_px, plate_basis, text_px, BAR_H, BAR_OFF_X, BAR_OFF_Y, BAR_W, LEVEL_H, LEVEL_OFF_X,
-        LEVEL_OFF_Y, PLATE_H, PLATE_W,
-    };
-    let seat = hero.single().ok().and_then(|h| {
-        let (cam, tf) = cams.single().ok()?;
-        let viewport = cam.logical_viewport_size()?;
-        let feet = cam
-            .world_to_viewport(&GlobalTransform::from(*tf), h.translation)
-            .ok()?;
-        Some((feet, viewport))
-    });
-    let mut frames = nodes.p0();
-    let Ok((mut frame, mut vis)) = frames.single_mut() else {
-        return;
-    };
-    let Some((feet, viewport)) = seat else {
-        *vis = Visibility::Hidden;
-        return;
-    };
-    *vis = Visibility::Inherited;
-    let s = ui_scale.0;
-    let basis = plate_basis(viewport);
-    let gx = |v: f32| gx_px(v, basis) / s * HERO_PLATE_SCALE;
-    let (pw, ph) = (gx(PLATE_W), gx(PLATE_H));
-    let bar_top = ph - gx(BAR_OFF_Y) - gx(BAR_H);
-    frame.width = Val::Px(pw);
-    frame.height = Val::Px(ph);
-    frame.left = Val::Px(feet.x / s - pw / 2.0);
-    frame.top = Val::Px(feet.y / s + gx(PLATE_FEET_GAP) - bar_top + PLATE_NUDGE / s);
-    if let Ok(mut bar) = nodes.p1().single_mut() {
-        bar.left = Val::Px(gx(BAR_OFF_X));
-        bar.top = Val::Px(bar_top);
-        bar.width = Val::Px(gx(BAR_W));
-        bar.height = Val::Px(gx(BAR_H));
-    }
     let stats = run.stats();
     let hp = (run.hp / stats.max_hp).clamp(0.0, 1.0);
     let shield = if run.shield_t > 0.0 {
@@ -1798,41 +1640,48 @@ pub(super) fn hero_plate(
     } else {
         0.0
     };
-    if let Ok(mut n) = nodes.p2().single_mut() {
-        n.width = Val::Percent(hp * 100.0);
+    let need = data::xp_to_next(run.level);
+    let xp = (run.xp / need).clamp(0.0, 1.0);
+    // Widths in tenths of a percent: finer than a pixel on the bar, coarse enough to stay put.
+    let pct = |f: f32| Val::Percent((f * 1000.0).round() / 10.0);
+    if let Ok(mut n) = fills.p0().single_mut() {
+        set_width(&mut n, pct(hp));
     }
-    if let Ok(mut n) = nodes.p3().single_mut() {
-        n.width = Val::Percent(shield * 100.0);
+    if let Ok(mut n) = fills.p1().single_mut() {
+        set_width(&mut n, pct(shield));
     }
-    if let Ok(mut seat) = nodes.p4().single_mut() {
-        seat.left = Val::Px(pw - gx(LEVEL_OFF_X));
-        seat.top = Val::Px(ph - gx(LEVEL_OFF_Y));
+    if let Ok(mut n) = fills.p2().single_mut() {
+        set_width(&mut n, pct(xp));
     }
-    if let Ok((mut text, mut font)) = level.single_mut() {
-        let n = run.level.to_string();
-        if text.0 != n {
-            text.0 = n;
-        }
-        let size = (text_px(LEVEL_H, basis) / s * HERO_PLATE_SCALE).max(HERO_LEVEL_MIN);
-        if font.font_size != size {
-            font.font_size = size;
-        }
+    if let Ok(mut t) = texts.p0().single_mut() {
+        set_text(
+            &mut t,
+            format!("{} / {}", run.hp.max(0.0).ceil() as u32, stats.max_hp.round() as u32),
+        );
+    }
+    if let Ok(mut t) = texts.p1().single_mut() {
+        set_text(&mut t, run.level.to_string());
     }
 }
 
-/// `MainMenuExpBar`'s `OnEnter` and `OnLeave`: the numbers show while the cursor is on the bar.
-pub(super) fn xp_hover(
-    bars: Query<&Interaction, (With<XpBar>, Changed<Interaction>)>,
-    mut texts: Query<&mut Visibility, With<XpText>>,
+/// The nodes anchored to the action side ([`ThumbAnchor`]): the right edge with the stick on the
+/// left, the left edge with it on the right. Touched only when the side changes or one arrives.
+pub(super) fn place_thumb(
+    side: Res<super::settings::StickSide>,
+    added: Query<(), Added<ThumbAnchor>>,
+    mut nodes: Query<(&ThumbAnchor, &mut Node)>,
 ) {
-    for interaction in &bars {
-        let want = if *interaction == Interaction::None {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
+    if !side.is_changed() && added.is_empty() {
+        return;
+    }
+    for (anchor, mut node) in &mut nodes {
+        let (left, right) = match *side {
+            super::settings::StickSide::Left => (Val::Auto, Val::Px(anchor.0)),
+            super::settings::StickSide::Right => (Val::Px(anchor.0), Val::Auto),
         };
-        for mut v in &mut texts {
-            *v = want;
+        if node.left != left || node.right != right {
+            node.left = left;
+            node.right = right;
         }
     }
 }
@@ -2453,7 +2302,6 @@ pub(super) fn show_panels(
     mut roots: ParamSet<(
         Query<(&mut Visibility, &mut Node), With<MenuRoot>>,
         Query<(&mut Visibility, &mut Node), With<HudRoot>>,
-        Query<(&mut Visibility, &mut Node), With<LevelUpRoot>>,
         Query<(&mut Visibility, &mut Node), With<PauseRoot>>,
         Query<(&mut Visibility, &mut Node), With<OverRoot>>,
     )>,
@@ -2481,12 +2329,9 @@ pub(super) fn show_panels(
         set(root, p != Phase::Menu && p != Phase::GameOver);
     }
     for root in &mut roots.p2() {
-        set(root, p == Phase::LevelUp);
-    }
-    for root in &mut roots.p3() {
         set(root, p == Phase::Paused);
     }
-    for root in &mut roots.p4() {
+    for root in &mut roots.p3() {
         set(root, p == Phase::GameOver);
     }
 }

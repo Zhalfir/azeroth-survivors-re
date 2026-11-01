@@ -11,7 +11,7 @@
 //! - **Shake:** one large-tier shake (`super::super::feedback`), scaled by the Shake setting, none
 //!   when it is Off.
 //! - **Queue:** several reveals play one after another, never overlapping.
-//! - **Waits:** nothing shows over the card pick or the pause menu ([`can_show`]); a reveal that
+//! - **Waits:** nothing shows over the pause menu ([`can_show`]); a reveal that
 //!   arrives there waits for play or the results, and one already showing freezes, hidden.
 //!
 //! In play it sits in the lower third, over the movement-spell slot and clear of the touch
@@ -87,8 +87,8 @@ pub(super) fn banner_place(phase: Phase) -> (Val, Val) {
     }
 }
 
-/// Whether a banner may show in `phase`: in play, on the results and at the menu, never over the
-/// card pick, the pause menu or a loading screen.
+/// Whether a banner may show in `phase`: in play (level-up choices included: they wait in play),
+/// on the results and at the menu, never over the pause menu or a loading screen.
 pub(super) fn can_show(phase: Phase, loading: bool) -> bool {
     !loading && matches!(phase, Phase::Playing | Phase::GameOver | Phase::Menu)
 }
@@ -430,8 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reveal_during_the_card_pick_waits_for_play() {
-        assert!(!can_show(Phase::LevelUp, false));
+    fn a_reveal_during_the_pause_waits_for_play() {
         assert!(!can_show(Phase::Paused, false));
         assert!(can_show(Phase::Playing, false));
         assert!(can_show(Phase::GameOver, false));
@@ -439,11 +438,11 @@ mod tests {
         let mut q = Reveals::default();
         q.push(SecretRace::Kobold);
         for _ in 0..100 {
-            assert_eq!(q.tick(0.1, can_show(Phase::LevelUp, false)), None);
+            assert_eq!(q.tick(0.1, can_show(Phase::Paused, false)), None);
         }
         assert_eq!(q.showing(), None);
         assert_eq!(q.tick(0.016, can_show(Phase::Playing, false)), Some(SecretRace::Kobold));
-        // A card pick mid-banner freezes it where it was.
+        // A pause mid-banner freezes it where it was.
         q.tick(1.0, true);
         q.tick(5.0, false);
         assert!((q.showing().unwrap().1 - 1.0).abs() < 1e-5);

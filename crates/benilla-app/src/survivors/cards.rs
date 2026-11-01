@@ -1,14 +1,13 @@
-//! The level-up picker, as a survivors game deals it: three tall cards that flip up out of the
-//! deck one after another, tilt toward the cursor, lift under it and burst on the pick. Each card
-//! wears its rarity in WoW's item-quality colours, so what is better reads at a glance: a fresh
-//! spell is Rare, a rank up Uncommon, a rank that adds a target or reaches the top Epic.
+//! The level-up choices, as a compact stack over the action thumb's cluster, and the rarity each
+//! wears in WoW's item-quality colours, so what is better reads at a glance: a fresh spell by its
+//! power among the class's, a rank up Uncommon, a rank that adds a target Epic, the top rank
+//! Legendary. The run keeps going while a set waits (see the stack's notes below).
 
 use bevy::prelude::*;
-use bevy::ui::RelativeCursorPosition;
 
 use super::data::{self, Kind};
-use super::fill::FillMaterial;
-use super::hud::{self, Choice, HudFont, Offer, SpellIcon};
+use super::hud::{self, Choice, HudFont, Offer, SpellIcon, SAFE_BOTTOM};
+use super::settings::StickSide;
 use super::{Phase, Rng, Run};
 
 /// WoW's item-quality colours (`ITEM_QUALITY_COLORS`).
@@ -17,12 +16,6 @@ pub(super) const UNCOMMON: Color = Color::srgb(0.118, 1.0, 0.0);
 pub(super) const RARE: Color = Color::srgb(0.0, 0.439, 0.867);
 pub(super) const EPIC: Color = Color::srgb(0.639, 0.208, 0.933);
 pub(super) const LEGENDARY: Color = Color::srgb(1.0, 0.502, 0.0);
-
-const CARD_W: f32 = 236.0;
-const CARD_H: f32 = 330.0;
-/// Seconds between one card landing and the next.
-const DEAL_STAGGER: f32 = 0.09;
-const DEAL_SECS: f32 = 0.38;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Rarity {
@@ -136,419 +129,687 @@ pub(super) fn rarity(choice: Choice, run: &Run) -> Rarity {
     }
 }
 
-/// One card's motion: dealt in, tilted to the cursor, lifted under it, burst on the pick.
-#[derive(Component)]
-pub(super) struct Card {
-    index: usize,
-    /// Seconds since this card's deal began; negative while it waits its turn.
-    t: f32,
-    hover: f32,
-    tilt: Vec2,
-    picked: Option<f32>,
-    rarity: Rarity,
+// --- The level-up stack. ---
+//
+// The choices wait in a compact stack over the action thumb's cluster while the run goes on at
+// full speed (the user's choice, 2026-11-01, `docs/superpowers/mockups/thumb-hud.png`). The run
+// never leaves `Phase::Playing` for a level: `Run::pending_levels` counts the sets owed, [`Offer`]
+// holds the one on show, and [`Stack`] the row picked out. A tap (or 1, 2, 3) picks a row out
+// and opens its tooltip toward the screen's centre; the same row again (or Enter, or the tooltip)
+// takes it; a tap anywhere else, Escape, or [`SELECT_SECS`] untouched lets it go.
+
+/// The stack's width and a row's height, in UI units: a thumb's target (at least 44).
+pub(super) const STACK_W: f32 = 220.0;
+pub(super) const ROW_H: f32 = 48.0;
+const ROW_GAP: f32 = 6.0;
+const HEADER_H: f32 = 28.0;
+/// The stack's inset from the action side's edge.
+pub(super) const STACK_SIDE: f32 = 12.0;
+/// The stack's foot: over the action arc (F, Q, C and the R slot kept for Phase C, `touch`)
+/// and its key hints.
+pub(super) const STACK_BOTTOM: f32 = SAFE_BOTTOM + 244.0;
+/// The tooltip's width and its gap from the stack.
+const TIP_W: f32 = 250.0;
+const TIP_GAP: f32 = 10.0;
+/// A picked-out row lets go after this long untouched (real seconds).
+pub(super) const SELECT_SECS: f32 = 4.0;
+/// A new set slides in from the side edge over this long, from this far out.
+const SLIDE_SECS: f32 = 0.15;
+const SLIDE_FROM: f32 = 60.0;
+
+const ROW_BG: Color = Color::srgba(0.07, 0.065, 0.055, 0.92);
+const ROW_BG_HOT: Color = Color::srgba(0.25, 0.17, 0.05, 0.95);
+const BADGE: Color = Color::srgb(0.73, 0.46, 0.09);
+const BADGE_TEXT: Color = Color::srgb(0.25, 0.14, 0.01);
+const TAKE_GREEN: Color = Color::srgb(0.59, 0.77, 0.35);
+
+#[cfg(not(target_os = "android"))]
+const TAKE_HINT: &str = "Click again, or Enter, to take";
+#[cfg(target_os = "android")]
+const TAKE_HINT: &str = "Tap again to take";
+
+/// One input to the stack.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum StackInput {
+    /// A row tapped or clicked, or its key (1, 2, 3).
+    Press(usize),
+    /// Enter, or the tooltip tapped: take the row picked out.
+    Confirm,
+    /// A tap or click anywhere else.
+    Away,
+    /// Escape.
+    Cancel,
 }
 
-/// The shine that sweeps across a card as it lands.
-#[derive(Component)]
-pub(super) struct CardShine(usize);
+/// The row picked out, and the clocks of the stack's motion.
+#[derive(Resource, Default, Debug)]
+pub(super) struct Stack {
+    pub selected: Option<usize>,
+    /// Real seconds since the selection was last touched.
+    idle: f32,
+    /// Real seconds since the set on show was dealt, for its slide-in.
+    slide: f32,
+    /// The [`Offer`] serial the rows were built for.
+    built: Option<u32>,
+}
 
-/// The radiant burst behind the row, turning slowly.
-#[derive(Component)]
-pub(super) struct Rays;
+impl Stack {
+    /// One input over `len` rows; the row to take, if this input takes one.
+    pub(super) fn input(&mut self, input: StackInput, len: usize) -> Option<usize> {
+        match input {
+            StackInput::Press(i) if i >= len => None,
+            StackInput::Press(i) if self.selected == Some(i) => {
+                self.selected = None;
+                Some(i)
+            }
+            StackInput::Press(i) => {
+                self.selected = Some(i);
+                self.idle = 0.0;
+                None
+            }
+            StackInput::Confirm => self.selected.take().filter(|&i| i < len),
+            StackInput::Away | StackInput::Cancel => {
+                self.selected = None;
+                None
+            }
+        }
+    }
 
-/// The pending pick: the card bursts, then the choice applies.
+    /// `dt` real seconds on: a selection left alone for [`SELECT_SECS`] lets go.
+    pub(super) fn tick(&mut self, dt: f32) {
+        self.slide += dt;
+        if self.selected.is_some() {
+            self.idle += dt;
+            if self.idle >= SELECT_SECS {
+                self.selected = None;
+            }
+        }
+    }
+}
+
+/// The header's badge: "+N" while more than one set is owed.
+pub(super) fn pending_badge(pending: u32) -> Option<String> {
+    (pending > 1).then(|| format!("+{pending}"))
+}
+
+/// Whether the stack shows: a set is owed and dealt, and the hero stands.
+pub(super) fn stack_visible(run: &Run, offer: &Offer) -> bool {
+    run.pending_levels > 0 && offer.len() > 0 && run.dead_t.is_none()
+}
+
+/// Taps the touch layer saw this frame that landed off the stack (`touch`, Android).
 #[derive(Resource, Default)]
-pub(super) struct PendingPick(Option<(usize, f32)>);
+pub(super) struct StackTaps {
+    pub away: bool,
+}
 
-const PICK_SECS: f32 = 0.28;
+#[derive(Component)]
+pub(super) struct StackRoot;
+#[derive(Component)]
+pub(super) struct StackTitle;
+#[derive(Component)]
+pub(super) struct StackBadge;
+#[derive(Component)]
+pub(super) struct StackBadgeText;
+#[derive(Component)]
+pub(super) struct StackRows;
+/// A row of the stack and the choice it shows.
+#[derive(Component)]
+pub(super) struct StackRow {
+    pub index: usize,
+    rarity: Rarity,
+}
+/// The selected row's tooltip; a tap on it takes the row.
+#[derive(Component)]
+pub(super) struct StackTip;
+#[derive(Component)]
+pub(super) struct StackTipName;
+#[derive(Component)]
+pub(super) struct StackTipBody;
 
-/// The cards, rebuilt for each offer.
-pub(super) fn deal_cards(
+/// The stack, its header and its tooltip; the rows come with each set ([`build_stack`]).
+pub(super) fn spawn_stack(mut commands: Commands, font: Option<Res<HudFont>>) {
+    let Some(font) = font else { return };
+    let f = &font.0;
+    commands
+        .spawn((
+            StackRoot,
+            hud::ThumbAnchor(STACK_SIDE),
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(STACK_BOTTOM),
+                right: Val::Px(STACK_SIDE),
+                width: Val::Px(STACK_W),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(ROW_GAP),
+                display: Display::None,
+                ..default()
+            },
+            GlobalZIndex(405),
+            Visibility::Hidden,
+        ))
+        .with_children(|root| {
+            root.spawn(Node {
+                height: Val::Px(HEADER_H),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|h| {
+                h.spawn((
+                    StackTitle,
+                    hud::text_bundle(f, "Level up", 20.0, hud::GOLD_TONE),
+                ));
+                h.spawn((
+                    StackBadge,
+                    Node {
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)),
+                        border_radius: BorderRadius::MAX,
+                        display: Display::None,
+                        ..default()
+                    },
+                    BackgroundColor(BADGE),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        StackBadgeText,
+                        Text::new(""),
+                        TextFont {
+                            font: f.clone(),
+                            font_size: 15.0,
+                            ..default()
+                        },
+                        TextColor(BADGE_TEXT),
+                    ));
+                });
+            });
+            root.spawn((
+                StackRows,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(ROW_GAP),
+                    ..default()
+                },
+            ));
+            // The tooltip, beside the selected row toward the screen's centre ([`animate_stack`]).
+            root.spawn((
+                StackTip,
+                Button,
+                Interaction::default(),
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(STACK_W + TIP_GAP),
+                    top: Val::Px(0.0),
+                    width: Val::Px(TIP_W),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    padding: UiRect::all(Val::Px(10.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.07, 0.065, 0.055, 0.95)),
+                BorderColor::all(hud::GOLD_TONE),
+            ))
+            .with_children(|t| {
+                t.spawn((
+                    StackTipName,
+                    hud::text_bundle(f, "", 18.0, hud::GOLD_TONE),
+                ));
+                t.spawn((
+                    StackTipBody,
+                    hud::text_bundle(f, "", 15.0, Color::srgb(0.86, 0.85, 0.8)),
+                ));
+                t.spawn(hud::text_bundle(f, TAKE_HINT, 14.0, TAKE_GREEN));
+            });
+        });
+}
+
+/// Keeps a set dealt while levels are owed, and none once they are not: a level from a gem, a
+/// chest, or the next set after a take shows at once; a maxed build's banked heals clear it.
+pub(super) fn deal_offer(run: Res<Run>, mut rng: ResMut<Rng>, mut offer: ResMut<Offer>) {
+    if run.pending_levels == 0 {
+        if offer.len() > 0 {
+            offer.clear();
+        }
+    } else if offer.len() == 0 {
+        hud::deal(&run, &mut rng, &mut offer);
+    }
+}
+
+/// Taps, clicks and keys on the stack, and the selection's timeout. Only in play: the pause
+/// menu, the results and the menu leave it be.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(super) fn stack_input(
+    time: Res<Time<Real>>,
+    phase: Res<State<Phase>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    rows: Query<(&StackRow, &Interaction), Changed<Interaction>>,
+    targets: Query<&Interaction, Or<(With<StackRow>, With<StackTip>)>>,
+    tip: Query<&Interaction, (With<StackTip>, Changed<Interaction>)>,
+    mut taps: ResMut<StackTaps>,
+    mut stack: ResMut<Stack>,
+    mut run: ResMut<Run>,
+    mut offer: ResMut<Offer>,
+    mut rng: ResMut<Rng>,
+) {
+    let away = std::mem::take(&mut taps.away);
+    if *phase.get() != Phase::Playing || !stack_visible(&run, &offer) {
+        if stack.selected.is_some() {
+            stack.selected = None;
+        }
+        return;
+    }
+    stack.tick(time.delta_secs());
+    let mut inputs: Vec<StackInput> = Vec::new();
+    for (row, i) in &rows {
+        if *i == Interaction::Pressed {
+            inputs.push(StackInput::Press(row.index));
+        }
+    }
+    if tip.iter().any(|i| *i == Interaction::Pressed) {
+        inputs.push(StackInput::Confirm);
+    }
+    for (i, key) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3]
+        .into_iter()
+        .enumerate()
+    {
+        if keys.just_pressed(key) {
+            inputs.push(StackInput::Press(i));
+        }
+    }
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+        inputs.push(StackInput::Confirm);
+    }
+    if keys.just_pressed(KeyCode::Escape) {
+        inputs.push(StackInput::Cancel);
+    }
+    // A click off the stack (desktop), or a finger that landed off it (`touch`).
+    let on_stack = targets.iter().any(|i| *i == Interaction::Pressed);
+    if away || (mouse.just_pressed(MouseButton::Left) && !on_stack) {
+        inputs.push(StackInput::Away);
+    }
+    for input in inputs {
+        if let Some(i) = stack.input(input, offer.len()) {
+            take(i, &mut stack, &mut run, &mut offer, &mut rng);
+            break;
+        }
+    }
+}
+
+/// Take row `i`: the choice applies and the next set, if any, slides in.
+pub(super) fn take(i: usize, stack: &mut Stack, run: &mut Run, offer: &mut Offer, rng: &mut Rng) {
+    stack.selected = None;
+    hud::pick(i, run, offer, rng);
+}
+
+/// The bot's press, through the same reducer a tap goes through (`auto`).
+pub(super) fn bot_press(i: usize, stack: &mut Stack, run: &mut Run, offer: &mut Offer, rng: &mut Rng) {
+    if let Some(i) = stack.input(StackInput::Press(i), offer.len()) {
+        take(i, stack, run, offer, rng);
+    }
+}
+
+/// The rows, rebuilt for each set dealt; the badge, on a change of the count owed.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(super) fn build_stack(
     mut commands: Commands,
     offer: Res<Offer>,
     run: Res<Run>,
+    side: Res<StickSide>,
     spells: Option<Res<crate::ui_action::Spells>>,
-    font: Res<HudFont>,
-    rows: Query<Entity, With<hud::OfferRow>>,
-    mut fills: ResMut<Assets<FillMaterial>>,
+    font: Option<Res<HudFont>>,
+    mut stack: ResMut<Stack>,
+    rows: Query<Entity, With<StackRows>>,
+    mut badge: Query<&mut Node, With<StackBadge>>,
+    mut texts: ParamSet<(
+        Query<&mut Text, With<StackBadgeText>>,
+        Query<(&mut Text, &mut TextColor), With<StackTitle>>,
+    )>,
+    mut owed: Local<Option<(u32, bool)>>,
 ) {
-    if !offer.is_changed() {
+    let Some(font) = font else { return };
+    let f = &font.0;
+    let key = (run.pending_levels, offer.is_chest());
+    if *owed != Some(key) {
+        *owed = Some(key);
+        let label = pending_badge(run.pending_levels);
+        if let Ok(mut node) = badge.single_mut() {
+            let display = if label.is_some() {
+                Display::Flex
+            } else {
+                Display::None
+            };
+            if node.display != display {
+                node.display = display;
+            }
+        }
+        if let Ok(mut t) = texts.p0().single_mut() {
+            let s = label.unwrap_or_default();
+            if t.0 != s {
+                t.0 = s;
+            }
+        }
+        // A boss's chest offers through the same stack, under its own gold header.
+        let title = if offer.is_chest() { "Chest" } else { "Level up" };
+        if let Ok((mut t, mut c)) = texts.p1().single_mut() {
+            if t.0 != title {
+                t.0 = title.to_string();
+            }
+            let color = if offer.is_chest() {
+                LEGENDARY
+            } else {
+                hud::GOLD_TONE
+            };
+            if c.0 != color {
+                c.0 = color;
+            }
+        }
+    }
+    if stack.built == Some(offer.serial()) {
         return;
     }
-    let Ok(row) = rows.single() else { return };
-    commands.entity(row).despawn_related::<Children>();
-    let f = &font.0;
-    commands.entity(row).with_children(|row| {
+    stack.built = Some(offer.serial());
+    stack.selected = None;
+    stack.slide = 0.0;
+    let Ok(row_box) = rows.single() else { return };
+    commands.entity(row_box).despawn_related::<Children>();
+    // Out at the side edge until the slide-in moves it ([`animate_stack`]).
+    let out = match *side {
+        StickSide::Left => SLIDE_FROM,
+        StickSide::Right => -SLIDE_FROM,
+    };
+    commands.entity(row_box).with_children(|list| {
         for (i, &choice) in offer.choices().iter().enumerate() {
             let card = hud::describe_card(choice, &run, spells.as_deref());
             let rarity = rarity(choice, &run);
             let rc = rarity.color();
-            row.spawn((
-                Card {
-                    index: i,
-                    t: -(i as f32) * DEAL_STAGGER,
-                    hover: 0.0,
-                    tilt: Vec2::ZERO,
-                    picked: None,
-                    rarity,
-                },
+            list.spawn((
+                StackRow { index: i, rarity },
                 Button,
                 Interaction::default(),
-                RelativeCursorPosition::default(),
                 Node {
-                    width: Val::Px(CARD_W),
-                    height: Val::Px(CARD_H),
-                    flex_direction: FlexDirection::Column,
+                    width: Val::Percent(100.0),
+                    height: Val::Px(ROW_H),
                     align_items: AlignItems::Center,
-                    padding: UiRect::new(
-                        Val::Px(16.0),
-                        Val::Px(16.0),
-                        Val::Px(18.0),
-                        Val::Px(14.0),
-                    ),
-                    row_gap: Val::Px(6.0),
+                    column_gap: Val::Px(8.0),
+                    padding: UiRect::horizontal(Val::Px(6.0)),
                     border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
-                BorderColor::all(rc),
-                BoxShadow::new(
-                    rc.with_alpha(0.0),
-                    Val::Px(0.0),
-                    Val::Px(0.0),
-                    Val::Px(0.0),
-                    Val::Px(26.0),
-                ),
+                BackgroundColor(ROW_BG),
+                BorderColor::all(rc.mix(&Color::BLACK, 0.45)),
                 UiTransform {
-                    translation: Val2::px(0.0, 260.0),
-                    scale: Vec2::splat(0.6),
-                    rotation: Rot2::degrees(-14.0),
+                    translation: Val2::px(out, 0.0),
+                    ..default()
                 },
-                Visibility::Hidden,
             ))
-            .with_children(|c| {
-                // A dark face lit from the top in the rarity's colour, inside the border.
-                let inner_h = CARD_H - 4.0;
-                c.spawn((
+            .with_children(|r| {
+                r.spawn((
                     Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(0.0),
-                        right: Val::Px(0.0),
-                        top: Val::Px(0.0),
-                        bottom: Val::Px(0.0),
+                        width: Val::Px(36.0),
+                        height: Val::Px(36.0),
+                        flex_shrink: 0.0,
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                    MaterialNode(
-                        fills.add(
-                            FillMaterial::vertical(
-                                rc.mix(&Color::BLACK, 0.55).with_alpha(0.98),
-                                Color::srgba(0.05, 0.04, 0.035, 0.97),
-                                0.42,
-                                Color::srgba(0.02, 0.015, 0.01, 0.98),
-                                8.0 / inner_h,
-                            )
-                            .with_glow(
-                                rc.with_alpha(0.45),
-                                Vec2::new(0.5, 60.0 / inner_h),
-                                Vec2::new((CARD_W - 4.0) / 2.0 / inner_h, 90.0 / inner_h),
-                            ),
-                        ),
-                    ),
-                    bevy::ui::FocusPolicy::Pass,
+                    ImageNode {
+                        color: Color::srgba(0.0, 0.0, 0.0, 0.6),
+                        ..default()
+                    },
+                    SpellIcon(card.spell),
                 ));
-                // The key and the rarity on one line along the top.
-                c.spawn(Node {
-                    width: Val::Percent(100.0),
-                    justify_content: JustifyContent::SpaceBetween,
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    overflow: Overflow::clip_x(),
                     ..default()
                 })
-                .with_children(|top| {
-                    top.spawn(hud::text_bundle(
-                        f,
-                        format!("{}", i + 1),
-                        15.0,
-                        hud::DIM_GREY,
+                .with_children(|col| {
+                    col.spawn((
+                        hud::text_bundle(f, card.name, 16.0, rc.mix(&Color::WHITE, 0.6)),
+                        TextLayout::new(Justify::Left, LineBreak::NoWrap),
                     ));
-                    top.spawn(hud::text_bundle(f, rarity.label(), 13.0, rc));
-                });
-                // The icon in a gold-rimmed socket.
-                c.spawn((
-                    Node {
-                        width: Val::Px(74.0),
-                        height: Val::Px(74.0),
-                        margin: UiRect::vertical(Val::Px(6.0)),
-                        border: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        ..default()
-                    },
-                    BorderColor::all(rc.mix(&hud::GOLD_TONE, 0.4)),
-                    BoxShadow::new(
-                        rc.with_alpha(0.55),
-                        Val::Px(0.0),
-                        Val::Px(0.0),
-                        Val::Px(2.0),
-                        Val::Px(14.0),
-                    ),
-                ))
-                .with_children(|s| {
-                    s.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::srgba(0.0, 0.0, 0.0, 0.6),
-                            ..default()
-                        },
-                        SpellIcon(card.spell),
+                    col.spawn((
+                        hud::text_bundle(
+                            f,
+                            format!("{} · {}", card.tag, rarity.label()),
+                            hud::TEXT_FLOOR,
+                            rc.mix(&Color::WHITE, 0.25),
+                        ),
+                        TextLayout::new(Justify::Left, LineBreak::NoWrap),
                     ));
                 });
-                c.spawn(hud::centered_bundle(
+                // The key, where there is a keyboard.
+                #[cfg(not(target_os = "android"))]
+                r.spawn(hud::text_bundle(
                     f,
-                    card.name,
-                    21.0,
-                    rc.mix(&Color::WHITE, 0.25),
-                ));
-                c.spawn(hud::centered_bundle(f, card.tag, 14.0, card.tag_color));
-                // The pips: rank now, and the one this pick fills.
-                if let Some((have, max)) = card.ranks {
-                    c.spawn(Node {
-                        column_gap: Val::Px(4.0),
-                        margin: UiRect::vertical(Val::Px(2.0)),
-                        ..default()
-                    })
-                    .with_children(|pips| {
-                        for r in 0..max {
-                            let color = if r < have {
-                                hud::GOLD_TONE
-                            } else if r == have {
-                                rc
-                            } else {
-                                Color::srgba(1.0, 1.0, 1.0, 0.12)
-                            };
-                            pips.spawn((
-                                Node {
-                                    width: Val::Px(14.0),
-                                    height: Val::Px(6.0),
-                                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(color),
-                            ));
-                        }
-                    });
-                }
-                c.spawn((
-                    Node {
-                        width: Val::Percent(80.0),
-                        height: Val::Px(1.0),
-                        margin: UiRect::vertical(Val::Px(4.0)),
-                        ..default()
-                    },
-                    BackgroundGradient::from(LinearGradient::to_right(vec![
-                        ColorStop::percent(rc.with_alpha(0.0), 0.0),
-                        ColorStop::percent(rc.with_alpha(0.8), 50.0),
-                        ColorStop::percent(rc.with_alpha(0.0), 100.0),
-                    ])),
-                ));
-                c.spawn(hud::centered_bundle(
-                    f,
-                    card.desc,
-                    14.0,
-                    Color::srgb(0.92, 0.9, 0.84),
-                ));
-                // The landing shine, a bright band that crosses once.
-                c.spawn((
-                    CardShine(i),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        top: Val::Px(-40.0),
-                        bottom: Val::Px(-40.0),
-                        width: Val::Px(70.0),
-                        left: Val::Px(-120.0),
-                        ..default()
-                    },
-                    BackgroundGradient::from(LinearGradient::to_right(vec![
-                        ColorStop::percent(Color::srgba(1.0, 1.0, 1.0, 0.0), 0.0),
-                        ColorStop::percent(Color::srgba(1.0, 0.97, 0.85, 0.28), 50.0),
-                        ColorStop::percent(Color::srgba(1.0, 1.0, 1.0, 0.0), 100.0),
-                    ])),
-                    UiTransform::from_rotation(Rot2::degrees(18.0)),
-                    bevy::ui::FocusPolicy::Pass,
+                    format!("{}", i + 1),
+                    hud::TEXT_FLOOR,
+                    hud::DIM_GREY,
                 ));
             });
         }
     });
 }
 
-fn ease_out_back(t: f32) -> f32 {
-    let c1 = 1.70158;
-    let c3 = c1 + 1.0;
-    1.0 + c3 * (t - 1.0).powi(3) + c1 * (t - 1.0).powi(2)
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
 }
 
-/// Deal, tilt, lift and burst: real time, since the game clock is paused under the picker.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
-pub(super) fn animate_cards(
-    time: Res<Time<Real>>,
+/// Shows the stack while a set waits in play, slides a new set in, lights the selected row and
+/// seats its tooltip toward the screen's centre. Every write only on a change.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub(super) fn animate_stack(
     phase: Res<State<Phase>>,
-    mut cards: Query<(
-        &mut Card,
-        &Interaction,
-        &RelativeCursorPosition,
-        &mut UiTransform,
-        &mut BoxShadow,
-        &mut Visibility,
-    )>,
-    mut shines: Query<(&CardShine, &mut Node)>,
-    mut rays: Query<&mut UiTransform, (With<Rays>, Without<Card>)>,
-    mut pending: ResMut<PendingPick>,
-    mut run: ResMut<Run>,
-    mut offer: ResMut<Offer>,
-    mut rng: ResMut<Rng>,
-    mut next: ResMut<NextState<Phase>>,
-) {
-    if *phase.get() != Phase::LevelUp {
-        pending.0 = None;
-        return;
-    }
-    let dt = time.delta_secs().min(0.05);
-    let now = time.elapsed_secs();
-    for mut r in &mut rays {
-        r.rotation = Rot2::radians(now * 0.12);
-        r.scale = Vec2::splat(1.0 + 0.03 * (now * 1.7).sin());
-    }
-    let chosen = pending.0.map(|(i, _)| i);
-    let mut shine_at = [None::<f32>; 4];
-    for (mut card, interaction, cursor, mut tf, mut shadow, mut vis) in &mut cards {
-        let card = &mut *card;
-        card.t += dt;
-        if card.t < 0.0 {
-            vis.set_if_neq(Visibility::Hidden);
-            continue;
-        }
-        vis.set_if_neq(Visibility::Inherited);
-        let deal = (card.t / DEAL_SECS).clamp(0.0, 1.0);
-        let e = ease_out_back(deal);
-        let hot = *interaction != Interaction::None && chosen.is_none() && deal >= 1.0;
-        let k = 1.0 - (-dt * 14.0).exp();
-        let hv = card.hover;
-        card.hover = hv + ((if hot { 1.0 } else { 0.0 }) - hv) * k;
-        let want_tilt = if hot {
-            cursor
-                .normalized
-                .unwrap_or_default()
-                .clamp(Vec2::splat(-0.5), Vec2::splat(0.5))
-        } else {
-            Vec2::ZERO
-        };
-        let tl = card.tilt;
-        card.tilt = tl + (want_tilt - tl) * k;
-        let h = card.hover;
-        // The pick: the chosen card swells and rises, the others drop away.
-        let (pick_scale, pick_y, pick_fade) = match (chosen, card.picked) {
-            (Some(c), _) if c == card.index => {
-                let p = card.picked.get_or_insert(0.0);
-                *p += dt;
-                let u = (*p / PICK_SECS).clamp(0.0, 1.0);
-                (1.0 + 0.18 * u, -30.0 * u, 0.0)
-            }
-            (Some(_), _) => {
-                let p = card.picked.get_or_insert(0.0);
-                *p += dt;
-                let u = (*p / PICK_SECS).clamp(0.0, 1.0);
-                (1.0 - 0.15 * u, 140.0 * u * u, u)
-            }
-            _ => (1.0, 0.0, 0.0),
-        };
-        // A perspective tilt, faked: the card turns about the cursor's side and leans with it.
-        let lean = card.tilt.x * 7.0;
-        let squash = 1.0 - card.tilt.x.abs() * 0.08;
-        let bob = (now * 2.2 + card.index as f32 * 1.3).sin() * 1.5 * (1.0 - h);
-        tf.translation = Val2::px(
-            0.0,
-            (1.0 - e) * 260.0 - 18.0 * h + card.tilt.y * 8.0 + bob + pick_y,
-        );
-        let s = (0.6 + 0.4 * e) * (1.0 + 0.06 * h) * pick_scale;
-        tf.scale = Vec2::new(s * squash, s * (1.0 + card.tilt.y.abs() * 0.02));
-        tf.rotation = Rot2::degrees((1.0 - e) * -14.0 + lean);
-        let rc = card.rarity.color();
-        // The glow follows hover and the pick; written only when it changes, since a blurred
-        // shadow rewritten every frame kept the card screen re-preparing it (the screen ran at
-        // ~20 fps on the tablet, 2026-10-31).
-        let color = rc.with_alpha((0.25 + 0.6 * h) * (1.0 - pick_fade));
-        let blur = Val::Px((18.0 + 22.0 * h).round());
-        let spread = Val::Px((2.0 + 4.0 * h).round());
-        let y = Val::Px((6.0 + 10.0 * h).round());
-        let stale = shadow.0.first().is_some_and(|sh| {
-            sh.blur_radius != blur
-                || sh.spread_radius != spread
-                || sh.y_offset != y
-                || (sh.color.alpha() - color.alpha()).abs() > 0.02
-        });
-        if stale {
-            if let Some(sh) = shadow.0.first_mut() {
-                sh.color = color;
-                sh.blur_radius = blur;
-                sh.spread_radius = spread;
-                sh.y_offset = y;
-            }
-        }
-        if pick_fade >= 1.0 {
-            vis.set_if_neq(Visibility::Hidden);
-        }
-        if card.index < shine_at.len() {
-            shine_at[card.index] = Some(card.t);
-        }
-    }
-    for (shine, mut node) in &mut shines {
-        let Some(t) = shine_at.get(shine.0).copied().flatten() else {
-            continue;
-        };
-        let u = ((t - DEAL_SECS * 0.6) / 0.5).clamp(0.0, 1.0);
-        // Written only while the shine moves: a `Node` write relays out the UI, and the shine
-        // used to rewrite its finished position every frame.
-        let left = Val::Px((-120.0 + u * (CARD_W + 200.0)).round());
-        if node.left != left {
-            node.left = left;
-        }
-    }
-    if let Some((i, t)) = pending.0.as_mut() {
-        *t += dt;
-        if *t >= PICK_SECS {
-            let i = *i;
-            pending.0 = None;
-            hud::pick(i, &mut run, &mut offer, &mut rng, &mut next);
-        }
-    }
-}
-
-/// A click on a card, or 1/2/3: start its burst; the choice applies when it finishes.
-pub(super) fn choose_card(
-    phase: Res<State<Phase>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    cards: Query<(&Card, &Interaction), Changed<Interaction>>,
+    run: Res<Run>,
     offer: Res<Offer>,
-    mut pending: ResMut<PendingPick>,
+    stack: Res<Stack>,
+    side: Res<StickSide>,
+    spells: Option<Res<crate::ui_action::Spells>>,
+    mut root: Query<(&mut Node, &mut Visibility), (With<StackRoot>, Without<StackTip>)>,
+    mut rows: Query<
+        (
+            &StackRow,
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut UiTransform,
+        ),
+        Without<StackTip>,
+    >,
+    mut tip: Query<(&mut Node, &mut Visibility), (With<StackTip>, Without<StackRoot>)>,
+    mut tip_texts: ParamSet<(
+        Query<&mut Text, With<StackTipName>>,
+        Query<&mut Text, With<StackTipBody>>,
+    )>,
+    mut shown: Local<Option<(u32, usize)>>,
 ) {
-    if *phase.get() != Phase::LevelUp || pending.0.is_some() {
+    let on = *phase.get() == Phase::Playing && stack_visible(&run, &offer);
+    if let Ok((mut node, mut vis)) = root.single_mut() {
+        let display = if on { Display::Flex } else { Display::None };
+        if node.display != display {
+            node.display = display;
+        }
+        vis.set_if_neq(if on {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
+    if !on {
         return;
     }
-    let mut pick = cards
-        .iter()
-        .find(|(c, i)| **i == Interaction::Pressed && c.t >= DEAL_SECS)
-        .map(|(c, _)| c.index);
-    for (i, key) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3]
-        .into_iter()
-        .enumerate()
-    {
-        if keys.just_pressed(key) {
-            pick = Some(i);
+    let u = ease_out_cubic((stack.slide / SLIDE_SECS).clamp(0.0, 1.0));
+    let dir = match *side {
+        StickSide::Left => 1.0,
+        StickSide::Right => -1.0,
+    };
+    let x = (dir * SLIDE_FROM * (1.0 - u)).round();
+    for (row, interaction, mut bg, mut border, mut tf) in &mut rows {
+        let hot = stack.selected == Some(row.index);
+        let want_bg = if hot {
+            ROW_BG_HOT
+        } else if *interaction == Interaction::Hovered {
+            ROW_BG.mix(&ROW_BG_HOT, 0.4)
+        } else {
+            ROW_BG
+        };
+        if bg.0 != want_bg {
+            bg.0 = want_bg;
+        }
+        let want_edge = if hot {
+            BorderColor::all(hud::GOLD_TONE)
+        } else {
+            BorderColor::all(row.rarity.color().mix(&Color::BLACK, 0.45))
+        };
+        if *border != want_edge {
+            *border = want_edge;
+        }
+        let at = Val2::px(x, 0.0);
+        if tf.translation != at {
+            tf.translation = at;
         }
     }
-    if let Some(i) = pick.filter(|&i| i < offer.len()) {
-        pending.0 = Some((i, 0.0));
+    let Ok((mut node, mut vis)) = tip.single_mut() else {
+        return;
+    };
+    let Some(i) = stack.selected.filter(|&i| i < offer.len()) else {
+        if node.display != Display::None {
+            node.display = Display::None;
+        }
+        vis.set_if_neq(Visibility::Hidden);
+        *shown = None;
+        return;
+    };
+    // Beside the row, toward the centre: left of a right-hand stack, right of a left-hand one.
+    let (left, right) = match *side {
+        StickSide::Left => (Val::Auto, Val::Px(STACK_W + TIP_GAP)),
+        StickSide::Right => (Val::Px(STACK_W + TIP_GAP), Val::Auto),
+    };
+    let top = Val::Px(HEADER_H + ROW_GAP + i as f32 * (ROW_H + ROW_GAP) - 8.0);
+    if node.left != left || node.right != right || node.top != top {
+        node.left = left;
+        node.right = right;
+        node.top = top;
+    }
+    if node.display != Display::Flex {
+        node.display = Display::Flex;
+    }
+    vis.set_if_neq(Visibility::Inherited);
+    if *shown == Some((offer.serial(), i)) {
+        return;
+    }
+    *shown = Some((offer.serial(), i));
+    let card = hud::describe_card(offer.choices()[i], &run, spells.as_deref());
+    if let Ok(mut t) = tip_texts.p0().single_mut() {
+        t.0 = card.name;
+    }
+    if let Ok(mut t) = tip_texts.p1().single_mut() {
+        t.0 = if card.desc.is_empty() {
+            card.tag
+        } else {
+            format!("{}\n{}", card.tag, card.desc)
+        };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn stack_shows_while_pending_and_game_runs() {
+        let mut world = World::new();
+        world.insert_resource(Run {
+            pending_levels: 2,
+            ..Run::default()
+        });
+        world.insert_resource(Offer::default());
+        world.insert_resource(Rng::default());
+        world.insert_resource(Time::<Virtual>::default());
+        assert!(!stack_visible(world.resource::<Run>(), world.resource::<Offer>()));
+        world.run_system_once(deal_offer).unwrap();
+        assert!(stack_visible(world.resource::<Run>(), world.resource::<Offer>()));
+        // Dealing a set neither pauses the clock nor leaves play.
+        assert!(!world.resource::<Time<Virtual>>().is_paused());
+
+        let mut run = world.remove_resource::<Run>().unwrap();
+        let mut offer = world.remove_resource::<Offer>().unwrap();
+        let mut rng = world.remove_resource::<Rng>().unwrap();
+        let mut stack = Stack::default();
+        let serial = offer.serial();
+        take(0, &mut stack, &mut run, &mut offer, &mut rng);
+        // The next set is dealt at once.
+        assert_eq!(run.pending_levels, 1);
+        assert!(stack_visible(&run, &offer));
+        assert_ne!(offer.serial(), serial);
+        take(0, &mut stack, &mut run, &mut offer, &mut rng);
+        assert_eq!(run.pending_levels, 0);
+        assert!(!stack_visible(&run, &offer));
+        // A dead hero's stack hides.
+        run.pending_levels = 1;
+        hud::deal(&run, &mut rng, &mut offer);
+        assert!(stack_visible(&run, &offer));
+        run.dead_t = Some(0.0);
+        assert!(!stack_visible(&run, &offer));
+    }
+
+    #[test]
+    fn second_tap_takes_first_tap_selects() {
+        let mut s = Stack::default();
+        assert_eq!(s.input(StackInput::Press(1), 3), None);
+        assert_eq!(s.selected, Some(1));
+        // Another row moves the selection; the same row again takes it.
+        assert_eq!(s.input(StackInput::Press(2), 3), None);
+        assert_eq!(s.selected, Some(2));
+        assert_eq!(s.input(StackInput::Press(2), 3), Some(2));
+        assert_eq!(s.selected, None);
+        // Enter takes the selected row, and nothing without one.
+        assert_eq!(s.input(StackInput::Confirm, 3), None);
+        s.input(StackInput::Press(0), 3);
+        assert_eq!(s.input(StackInput::Confirm, 3), Some(0));
+        // A row past the set does nothing.
+        assert_eq!(s.input(StackInput::Press(2), 1), None);
+        assert_eq!(s.selected, None);
+        // A tap elsewhere and Escape let go.
+        s.input(StackInput::Press(0), 3);
+        assert_eq!(s.input(StackInput::Away, 3), None);
+        assert_eq!(s.selected, None);
+        s.input(StackInput::Press(0), 3);
+        assert_eq!(s.input(StackInput::Cancel, 3), None);
+        assert_eq!(s.selected, None);
+    }
+
+    #[test]
+    fn deselect_after_timeout() {
+        let mut s = Stack::default();
+        s.input(StackInput::Press(1), 3);
+        s.tick(SELECT_SECS - 0.1);
+        assert_eq!(s.selected, Some(1));
+        // Picking another row restarts the clock.
+        s.input(StackInput::Press(0), 3);
+        s.tick(SELECT_SECS - 0.1);
+        assert_eq!(s.selected, Some(0));
+        s.tick(0.2);
+        assert_eq!(s.selected, None);
+        // With nothing selected the clock is idle: a later pick gets its full time.
+        s.tick(10.0);
+        s.input(StackInput::Press(2), 3);
+        s.tick(1.0);
+        assert_eq!(s.selected, Some(2));
+    }
+
+    #[test]
+    fn pending_badge_counts() {
+        assert_eq!(pending_badge(0), None);
+        assert_eq!(pending_badge(1), None);
+        assert_eq!(pending_badge(2).as_deref(), Some("+2"));
+        assert_eq!(pending_badge(7).as_deref(), Some("+7"));
     }
 }

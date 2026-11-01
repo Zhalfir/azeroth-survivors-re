@@ -28,6 +28,8 @@ pub(super) struct Auto {
     late: bool,
     frames: u32,
     wait: f32,
+    /// Real seconds the level-up stack has waited on the bot: it picks a row out, then takes it.
+    pick_t: f32,
     shots: Option<std::path::PathBuf>,
     shot_t: f32,
     shot_n: u32,
@@ -121,6 +123,7 @@ impl Auto {
             late,
             frames: 0,
             wait: 0.0,
+            pick_t: 0.0,
             shots,
             shot_t: 3.0,
             shot_n: 0,
@@ -312,6 +315,7 @@ pub(super) fn drive(
     mut selection: ResMut<Selection>,
     mut run: ResMut<Run>,
     mut offer: ResMut<Offer>,
+    mut stack: ResMut<super::cards::Stack>,
     mut rng: ResMut<Rng>,
     loading: Res<crate::loading_screen::LoadingScreen>,
     heroes: Query<(), With<Hero>>,
@@ -370,12 +374,12 @@ pub(super) fn drive(
                 auto.wait = 0.0;
             }
         }
-        Phase::LevelUp => {
-            // After the deal-in, so the shot shows the cards settled.
-            if auto.wait > 1.2 && (run.level <= 3 || run.level == 10) {
-                auto.capture_once(&mut commands, format!("levelup-{}", run.level));
-            }
-            if auto.wait > 1.6 {
+        // Level-up choices wait in play: the bot taps a row, then the same row again, through
+        // the stack's own reducer (`cards::bot_press`), and keeps moving all the while.
+        Phase::Playing if super::cards::stack_visible(&run, &offer) => {
+            auto.wait = 0.0;
+            auto.pick_t += dt;
+            if stack.selected.is_none() && auto.pick_t > 0.6 {
                 let i = offer
                     .choices()
                     .iter()
@@ -383,8 +387,15 @@ pub(super) fn drive(
                     .map(|(i, c)| (i, card_value(c, &run) + rng.range(0.0, 0.3)))
                     .max_by(|a, b| a.1.total_cmp(&b.1))
                     .map_or(0, |(i, _)| i);
-                hud::pick(i, &mut run, &mut offer, &mut rng, &mut next);
-                auto.wait = 0.0;
+                super::cards::bot_press(i, &mut stack, &mut run, &mut offer, &mut rng);
+            }
+            // With the row picked out and its tooltip open, so the shot shows both.
+            if auto.pick_t > 1.0 && (run.level <= 3 || run.level == 10) {
+                auto.capture_once(&mut commands, format!("levelup-{}", run.level));
+            }
+            if let Some(i) = stack.selected.filter(|_| auto.pick_t > 1.2) {
+                super::cards::bot_press(i, &mut stack, &mut run, &mut offer, &mut rng);
+                auto.pick_t = 0.0;
             }
         }
         Phase::GameOver => {

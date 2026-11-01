@@ -92,12 +92,14 @@ impl Plugin for SurvivorsPlugin {
             .init_resource::<abilities::PendingHits>()
             .init_resource::<enemies::Spawner>()
             .init_resource::<hud::Offer>()
-            .init_resource::<cards::PendingPick>()
+            .init_resource::<cards::Stack>()
+            .init_resource::<cards::StackTaps>()
             .add_message::<abilities::Hit>()
             .add_message::<enemies::Loot>()
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<hud::SweepUiMaterial>::default())
             .add_plugins(bevy::ui_render::UiMaterialPlugin::<fill::FillMaterial>::default())
             .add_systems(Startup, hud::setup_hud)
+            .add_systems(Startup, cards::spawn_stack.after(hud::setup_hud))
             .add_systems(Update, hero::daylight)
             .add_systems(
                 Update,
@@ -156,9 +158,11 @@ impl Plugin for SurvivorsPlugin {
                     menu::build_menu,
                     menu::menu_clicks,
                     menu::refresh_menu_ui.before(crate::glue::GlueVisuals),
-                    cards::deal_cards,
-                    cards::choose_card,
-                    cards::animate_cards,
+                    // After `hud::keys`, which leaves Escape to a picked-out row.
+                    cards::deal_offer,
+                    cards::stack_input,
+                    cards::build_stack,
+                    cards::animate_stack,
                     hud::refresh_hud,
                     hud::refresh_results,
                     hud::fill_icons,
@@ -174,9 +178,9 @@ impl Plugin for SurvivorsPlugin {
                 (
                     hud::apply_ui_scale,
                     hud::fill_art,
-                    hud::xp_hover,
+                    hud::place_thumb,
                     hud::icon_tooltip,
-                    hud::hero_plate,
+                    hud::thumb_vitals,
                     hud::demo_label,
                     minimap::map_buttons,
                     minimap::zone_text,
@@ -186,11 +190,6 @@ impl Plugin for SurvivorsPlugin {
                     .after(hud::show_panels),
             )
             .add_systems(OnEnter(Phase::Playing), (unpause, grace))
-            .add_systems(
-                OnEnter(Phase::LevelUp),
-                (pause, hud::roll_offer, hero::remember_heading),
-            )
-            .add_systems(OnExit(Phase::LevelUp), hero::carry_heading)
             .add_systems(OnEnter(Phase::Paused), pause)
             .add_systems(OnEnter(Phase::GameOver), unpause)
             .add_systems(OnEnter(Phase::Menu), (unpause, reset_run));
@@ -218,13 +217,13 @@ impl Plugin for SurvivorsPlugin {
     }
 }
 
-/// The screen the mode is on.
+/// The screen the mode is on. A level-up is not one: its choices wait in the stack over the
+/// action thumb while play goes on (`cards`, `Run::pending_levels`).
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub(super) enum Phase {
     #[default]
     Menu,
     Playing,
-    LevelUp,
     Paused,
     GameOver,
 }
@@ -369,7 +368,10 @@ pub(super) struct Run {
     /// counterattack skills (read from Task B3 on).
     #[allow(dead_code)]
     pub guarded: Option<(guard::Guarded, f32)>,
+    /// Choice sets owed: one per level gained and per boss chest opened (`cards`).
     pub pending_levels: u32,
+    /// How many of `pending_levels` are chests', dealt first under a "Chest" header.
+    pub pending_chests: u32,
     pub bosses: u32,
     pub rings: u32,
     pub won: bool,
@@ -421,6 +423,7 @@ impl Default for Run {
             potion_cd: 0.0,
             guarded: None,
             pending_levels: 0,
+            pending_chests: 0,
             bosses: 0,
             rings: 0,
             won: false,
@@ -573,9 +576,9 @@ fn unpause(mut time: ResMut<Time<Virtual>>) {
     time.unpause();
 }
 
-/// Back in play after a card, the pause menu or the start, the hero is immune for a moment (the
-/// Divine Shield bubble shows it): on a tablet the thumb has to travel from the card or button
-/// back to the joystick.
+/// Back in play after the pause menu or at the start, the hero is immune for a moment (the
+/// Divine Shield bubble shows it): on a tablet the thumb has to travel from the button back to
+/// the joystick.
 const GRACE_SECS: f32 = 1.0;
 
 fn grace(mut run: ResMut<Run>) {
@@ -590,7 +593,12 @@ fn reset_run(
     mut pending: ResMut<abilities::PendingHits>,
     mut spawner: ResMut<enemies::Spawner>,
     mut selection: ResMut<Selection>,
+    mut offer: ResMut<hud::Offer>,
+    mut stack: ResMut<cards::Stack>,
 ) {
+    // No set left over for the next run: its indices would point into this run's build.
+    offer.clear();
+    stack.selected = None;
     for e in &spawned {
         commands.entity(e).despawn();
     }

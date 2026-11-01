@@ -36,6 +36,7 @@ fn lin(c: Color) -> Vec4 {
 impl FillMaterial {
     /// Top to bottom through `mid` at `mid_at` (0..1), with corners rounded by `radius`, a
     /// fraction of the node's height.
+    #[allow(dead_code)] // The level-up cards' face; kept for the next panel that wants it.
     pub(super) fn vertical(
         top: Color,
         mid: Color,
@@ -71,6 +72,7 @@ impl FillMaterial {
 
     /// Lays an elliptical light over the fill: `color` (its alpha is the peak) at `at` in UV,
     /// fading to nothing at `radii`, fractions of the node's height.
+    #[allow(dead_code)]
     pub(super) fn with_glow(mut self, color: Color, at: Vec2, radii: Vec2) -> Self {
         self.fill.glow = lin(color);
         self.fill.glow_at = Vec4::new(at.x, at.y, radii.x, radii.y);

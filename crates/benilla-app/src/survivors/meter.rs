@@ -276,7 +276,7 @@ fn refresh_live(
     let Ok((e, mut node)) = panel.single_mut() else {
         return;
     };
-    let in_run = matches!(phase.get(), Phase::Playing | Phase::LevelUp | Phase::Paused);
+    let in_run = matches!(phase.get(), Phase::Playing | Phase::Paused);
     let shown = in_run && setting.live && !run.meter.is_empty();
     let display = if shown { Display::Flex } else { Display::None };
     if node.display != display {

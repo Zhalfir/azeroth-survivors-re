@@ -10,7 +10,7 @@ use super::units::Fx;
 use super::{Phase, Run};
 
 pub(super) const POTION_KEY: KeyCode = KeyCode::KeyQ;
-/// Run seconds, so it follows the 2× speed and stops on the card screen.
+/// Run seconds, so it follows the 2× speed and stops while paused.
 pub(super) const POTION_COOLDOWN: f32 = 60.0;
 /// Healing Potion: its visual and sound.
 pub(super) const POTION_SPELL: u32 = 441;
@@ -96,7 +96,8 @@ mod tests {
         run.hp = run.stats().max_hp;
         assert!(!can_drink(&run, Phase::Playing));
         run.hp = hurt;
-        for phase in [Phase::Paused, Phase::LevelUp, Phase::Menu, Phase::GameOver] {
+        // Level-up choices wait in play (`cards`): a drink stays open while they do.
+        for phase in [Phase::Paused, Phase::Menu, Phase::GameOver] {
             assert!(!can_drink(&run, phase), "{phase:?}");
         }
         run.dead_t = Some(0.0);

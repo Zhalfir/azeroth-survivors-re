@@ -104,11 +104,11 @@ impl GameSpeed {
 }
 
 /// The virtual clock's relative speed in `phase` with `choice` picked: the choice while a run is
-/// on (play, the card pick and the pause menu keep it, the clock being paused under the last
-/// two), 1× at the menu and on the results.
+/// on (play and the pause menu keep it, the clock being paused under the latter; level-up
+/// choices wait in play, `cards`), 1× at the menu and on the results.
 pub(super) fn speed_for(phase: Phase, choice: GameSpeed) -> f32 {
     match phase {
-        Phase::Playing | Phase::LevelUp | Phase::Paused => choice.factor(),
+        Phase::Playing | Phase::Paused => choice.factor(),
         Phase::Menu | Phase::GameOver => 1.0,
     }
 }
@@ -175,14 +175,14 @@ fn flip(
     real: Res<Time<Real>>,
     mut tf: Query<&mut UiTransform, With<SpeedButton>>,
 ) {
-    let in_run = matches!(phase.get(), Phase::Playing | Phase::LevelUp | Phase::Paused);
+    let in_run = matches!(phase.get(), Phase::Playing | Phase::Paused);
     let pressed = buttons.iter().any(|i| *i == Interaction::Pressed);
     if in_run && !secrets_page.is_open() && (keys.just_pressed(KEY) || pressed) {
         let now = GameSpeed::cycle();
         info!("survivors: game speed {}×", now.name());
         *popped = Some(0.0);
     }
-    // The pop: 1.15 → 1.0, eased out, in real time (the clock may be paused under the cards).
+    // The pop: 1.15 → 1.0, eased out, in real time (the clock may be paused under the pause menu).
     if let Some(t) = popped.as_mut() {
         *t += real.delta_secs();
         let x = (*t / POP).min(1.0);
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn speed_for_keeps_the_choice_through_the_run_and_one_x_outside_it() {
-        for p in [Phase::Playing, Phase::LevelUp, Phase::Paused] {
+        for p in [Phase::Playing, Phase::Paused] {
             assert_eq!(speed_for(p, GameSpeed::Double), 2.0);
             assert_eq!(speed_for(p, GameSpeed::Normal), 1.0);
         }

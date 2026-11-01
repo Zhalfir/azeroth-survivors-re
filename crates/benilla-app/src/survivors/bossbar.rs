@@ -193,7 +193,7 @@ pub(super) fn plugin(app: &mut App) {
             update.run_if(resource_exists::<BossUi>),
         )
             .chain()
-            .after(hud::hero_plate),
+            .after(hud::thumb_vitals),
     )
     .add_systems(OnEnter(Phase::Menu), reset);
 }
