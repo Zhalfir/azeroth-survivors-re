@@ -1,7 +1,7 @@
 //! The arcade records: every zone keeps a top ten, as an old cabinet does (`docs/PROGRESSION.md`).
 //!
-//! A run that makes its zone's table, won or lost, asks for three initials on the results screen,
-//! cabinet style: + and - by each letter, OK to keep them. They start from the character's name.
+//! A run that makes its zone's table, won or lost, enters it under the character's full name
+//! straight away, and the results screen says "New record!" with its place.
 //! A **Records** button under the character list opens the tables, one zone at a time, the
 //! playing character's entries lit. Runs the auto-player drives (`super::auto`) never enter.
 //!
@@ -29,7 +29,9 @@ const MINE: Color = Color::srgba(0.45, 0.3, 0.05, 0.6);
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(super) struct Record {
-    pub initials: String,
+    /// The character's full name. Files written before names were kept call it `initials`.
+    #[serde(alias = "initials")]
+    pub name: String,
     pub kills: u32,
     /// Seconds survived.
     pub secs: f32,
@@ -96,13 +98,6 @@ fn load() -> Records {
         .unwrap_or_default()
 }
 
-/// The run waiting for its initials, and the three letters as they stand.
-#[derive(Resource, Default)]
-struct Entry {
-    pending: Option<(String, Record)>,
-    letters: [u8; 3],
-}
-
 /// The records page: open, and the zone shown (an index into the menu's zone order).
 #[derive(Resource, Default)]
 struct Page {
@@ -111,12 +106,10 @@ struct Page {
     version: u32,
 }
 
+/// The results screen's "New record!" line, placed by `hud::setup_hud`; empty when the run
+/// made no table.
 #[derive(Component)]
-struct EntryRoot;
-#[derive(Component)]
-struct EntryLetter(usize);
-#[derive(Component)]
-struct EntryHeadline;
+pub(super) struct RecordLine;
 #[derive(Component)]
 struct PageRoot;
 #[derive(Component)]
@@ -128,9 +121,6 @@ struct OpenButton;
 
 #[derive(Component, Clone, Copy, PartialEq)]
 enum RecButton {
-    Up(usize),
-    Down(usize),
-    Ok,
     Open,
     Prev,
     Next,
@@ -139,12 +129,10 @@ enum RecButton {
 
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(load())
-        .init_resource::<Entry>()
         .init_resource::<Page>()
         .add_systems(Startup, spawn_ui.after(super::characters::spawn_ui))
-        .add_systems(OnEnter(Phase::GameOver), offer_entry)
-        .add_systems(OnExit(Phase::GameOver), drop_entry)
-        .add_systems(Update, (press, show, refresh_entry, rebuild_page).chain());
+        .add_systems(OnEnter(Phase::GameOver), store_record)
+        .add_systems(Update, (press, show, rebuild_page).chain());
 }
 
 fn text(font: &Handle<Font>, s: impl Into<String>, size: f32, color: Color) -> impl Bundle {
@@ -196,64 +184,6 @@ fn button(
 fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(Entity, &LeftSlot)>) {
     let Some(font) = font else { return };
     let f = &font.0;
-    // The initials prompt, over the results.
-    commands
-        .spawn((
-            EntryRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(14.0),
-                display: Display::None,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.88)),
-            GlobalZIndex(460),
-        ))
-        .with_children(|root| {
-            root.spawn(text(f, "NEW RECORD!", 52.0, GOLD));
-            root.spawn((text(f, "", 20.0, Color::WHITE), EntryHeadline));
-            root.spawn(text(f, "Enter your initials", 18.0, DIM));
-            root.spawn(Node {
-                column_gap: Val::Px(26.0),
-                ..default()
-            })
-            .with_children(|row| {
-                for i in 0..3 {
-                    row.spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        align_items: AlignItems::Center,
-                        row_gap: Val::Px(8.0),
-                        ..default()
-                    })
-                    .with_children(|col| {
-                        button(col, f, RecButton::Up(i), "+", 72.0, 52.0);
-                        col.spawn((
-                            Node {
-                                width: Val::Px(72.0),
-                                height: Val::Px(80.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(2.0)),
-                                border_radius: BorderRadius::all(Val::Px(6.0)),
-                                ..default()
-                            },
-                            BackgroundColor(FILL),
-                            BorderColor::all(GOLD),
-                        ))
-                        .with_children(|c| {
-                            c.spawn((text(f, "A", 56.0, GOLD), EntryLetter(i)));
-                        });
-                        button(col, f, RecButton::Down(i), "-", 72.0, 52.0);
-                    });
-                }
-            });
-            button(root, f, RecButton::Ok, "OK", 240.0, 48.0);
-        });
     // The records page, over the menu.
     commands
         .spawn((
@@ -298,7 +228,8 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(En
             root.spawn((
                 PageRows,
                 Node {
-                    width: Val::Px(700.0),
+                    // Wide enough for a twelve-letter name column (`NAME_MAX`).
+                    width: Val::Px(800.0),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(3.0),
                     padding: UiRect::all(Val::Px(10.0)),
@@ -333,68 +264,71 @@ fn spawn_ui(mut commands: Commands, font: Option<Res<HudFont>>, slots: Query<(En
     });
 }
 
-/// The three letters a name starts with, `A` for the rest.
-fn initials_of(name: &str) -> [u8; 3] {
-    let mut out = [b'A'; 3];
-    for (i, c) in name
-        .chars()
-        .filter(char::is_ascii_alphabetic)
-        .take(3)
-        .enumerate()
-    {
-        out[i] = c.to_ascii_uppercase() as u8;
+/// The name a record keeps: the character's full name (at most [`NAME_MAX`] characters), "Demo"
+/// for a run the auto-player drove, "Hero" when there is no character.
+pub(super) fn record_name(character: Option<&str>, demo: bool) -> String {
+    if demo {
+        return "Demo".to_string();
     }
-    out
+    match character.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => n.chars().take(NAME_MAX).collect(),
+        None => "Hero".to_string(),
+    }
 }
 
-fn offer_entry(
+/// The longest name the table's name column fits.
+pub(super) const NAME_MAX: usize = 12;
+
+/// At the results: a run that makes its zone's table goes in under the character's name, and
+/// the results screen's line says so.
+fn store_record(
     run: Res<Run>,
     selection: Res<Selection>,
-    records: Res<Records>,
+    mut records: ResMut<Records>,
     chars: Res<Characters>,
     auto: Option<Res<Auto>>,
-    mut entry: ResMut<Entry>,
+    mut page: ResMut<Page>,
+    mut lines: Query<&mut Text, With<RecordLine>>,
 ) {
-    entry.pending = None;
-    if !super::secrets::records_progress(auto.is_some(), super::hero::god_mode()) || run.kills == 0
-    {
-        return;
+    let mut line = String::new();
+    if super::secrets::records_progress(auto.is_some(), super::hero::god_mode()) && run.kills > 0 {
+        let map = data::MAPS[selection.stage.min(data::MAPS.len() - 1)].name;
+        let unix = web_time::SystemTime::now()
+            .duration_since(web_time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let character = selection
+            .character
+            .and_then(|id| chars.list.iter().find(|c| c.id == id))
+            .map(|c| c.name.as_str());
+        let record = Record {
+            name: record_name(character, auto.is_some()),
+            kills: run.kills,
+            secs: run.elapsed,
+            class: run.class.name.to_string(),
+            difficulty: data::difficulty().name().to_string(),
+            won: run.won,
+            level: run.level,
+            date: unix,
+            character: selection.character,
+        };
+        if records.qualifies(map, &record) {
+            let place = records.insert(map, record);
+            save(&records);
+            super::combatlog::event(0.0, format!("record: {map}, place {}", place + 1));
+            page.version += 1;
+            line = format!("New record! #{} in {map}", place + 1);
+        }
     }
-    let map = data::MAPS[selection.stage.min(data::MAPS.len() - 1)].name;
-    let unix = web_time::SystemTime::now()
-        .duration_since(web_time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let record = Record {
-        initials: String::new(),
-        kills: run.kills,
-        secs: run.elapsed,
-        class: run.class.name.to_string(),
-        difficulty: data::difficulty().name().to_string(),
-        won: run.won,
-        level: run.level,
-        date: unix,
-        character: selection.character,
-    };
-    if !records.qualifies(map, &record) {
-        return;
+    for mut t in &mut lines {
+        if t.0 != line {
+            t.0 = line.clone();
+        }
     }
-    let name = selection
-        .character
-        .and_then(|id| chars.list.iter().find(|c| c.id == id))
-        .map_or("AAA", |c| c.name.as_str());
-    entry.letters = initials_of(name);
-    entry.pending = Some((map.to_string(), record));
-}
-
-fn drop_entry(mut entry: ResMut<Entry>) {
-    entry.pending = None;
 }
 
 #[allow(clippy::too_many_arguments)]
 fn press(
     mut buttons: Query<(&Interaction, &RecButton, &mut BackgroundColor), Changed<Interaction>>,
-    mut entry: ResMut<Entry>,
-    mut records: ResMut<Records>,
     mut page: ResMut<Page>,
     selection: Res<Selection>,
 ) {
@@ -408,24 +342,6 @@ fn press(
         }
         let zones = super::menu::zone_order();
         match *action {
-            RecButton::Up(i) => {
-                let c = &mut entry.letters[i];
-                *c = if *c >= b'Z' { b'A' } else { *c + 1 };
-            }
-            RecButton::Down(i) => {
-                let c = &mut entry.letters[i];
-                *c = if *c <= b'A' { b'Z' } else { *c - 1 };
-            }
-            RecButton::Ok => {
-                let letters = entry.letters;
-                if let Some((map, mut record)) = entry.pending.take() {
-                    record.initials = String::from_utf8_lossy(&letters).into_owned();
-                    let place = records.insert(&map, record);
-                    save(&records);
-                    super::combatlog::event(0.0, format!("record: {map}, place {}", place + 1));
-                    page.version += 1;
-                }
-            }
             RecButton::Open => {
                 page.open = true;
                 page.zone = zones
@@ -450,11 +366,9 @@ fn press(
 #[allow(clippy::type_complexity)]
 fn show(
     phase: Res<State<Phase>>,
-    entry: Res<Entry>,
     mut page: ResMut<Page>,
     selection: Res<crate::survivors::Selection>,
     mut nodes: ParamSet<(
-        Query<&mut Node, With<EntryRoot>>,
         Query<&mut Node, With<PageRoot>>,
         Query<&mut Node, With<OpenButton>>,
     )>,
@@ -469,44 +383,13 @@ fn show(
             n.display = d;
         }
     };
-    let entering = *phase.get() == Phase::GameOver && entry.pending.is_some();
     for n in &mut nodes.p0() {
-        set(n, entering);
-    }
-    for n in &mut nodes.p1() {
         set(n, menu && page.open);
     }
     // Create Character has no opener, as for Talents and Secrets.
     let listing = selection.character.is_some();
-    for n in &mut nodes.p2() {
+    for n in &mut nodes.p1() {
         set(n, menu && listing && !page.open);
-    }
-}
-
-fn refresh_entry(
-    entry: Res<Entry>,
-    mut letters: Query<(&EntryLetter, &mut Text), Without<EntryHeadline>>,
-    mut headline: Query<&mut Text, With<EntryHeadline>>,
-) {
-    if !entry.is_changed() {
-        return;
-    }
-    for (l, mut t) in &mut letters {
-        let want = (entry.letters[l.0] as char).to_string();
-        if t.0 != want {
-            t.0 = want;
-        }
-    }
-    if let (Ok(mut t), Some((map, r))) = (headline.single_mut(), &entry.pending) {
-        let secs = r.secs as u32;
-        t.0 = format!(
-            "{map} · {} kills · {:02}:{:02} · {} {}",
-            r.kills,
-            secs / 60,
-            secs % 60,
-            r.class,
-            r.difficulty
-        );
     }
 }
 
@@ -578,11 +461,10 @@ fn rebuild_page(
                     18.0,
                     DIM,
                 ));
-                row.spawn((cell(70.0), Pickable::IGNORE)).with_child(text(
-                    f,
-                    r.initials.clone(),
-                    20.0,
-                    GOLD,
+                // Twelve characters at 20 units, on one line.
+                row.spawn((cell(150.0), Pickable::IGNORE)).with_child((
+                    text(f, r.name.clone(), 20.0, GOLD),
+                    TextLayout::new_with_no_wrap(),
                 ));
                 row.spawn((cell(110.0), Pickable::IGNORE)).with_child(text(
                     f,
@@ -630,4 +512,45 @@ fn rebuild_page(
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_records_load_with_initials_as_name() {
+        let old = r#"
+[[zones."Elwynn Forest"]]
+initials = "ABC"
+kills = 120
+secs = 300.0
+class = "Warrior"
+difficulty = "Normal"
+won = false
+level = 9
+date = 1700000000
+"#;
+        let records: Records = toml::from_str(old).expect("old records load");
+        let t = records.table("Elwynn Forest");
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].name, "ABC");
+        assert_eq!(t[0].character, None);
+        // Written back, the field is `name`.
+        let text = toml::to_string(&records).unwrap();
+        assert!(text.contains("name = \"ABC\""), "{text}");
+        assert!(!text.contains("initials"), "{text}");
+    }
+
+    #[test]
+    fn new_record_takes_character_name() {
+        assert_eq!(record_name(Some("Thrallsworth"), false), "Thrallsworth");
+        assert_eq!(record_name(Some("Bob"), false), "Bob");
+        // Longer than the column: cut at twelve.
+        assert_eq!(record_name(Some("Abcdefghijklmnop"), false), "Abcdefghijkl");
+        assert_eq!(record_name(Some("Bob"), true), "Demo");
+        assert_eq!(record_name(None, true), "Demo");
+        assert_eq!(record_name(None, false), "Hero");
+        assert_eq!(record_name(Some("  "), false), "Hero");
+    }
 }

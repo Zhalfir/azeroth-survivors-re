@@ -906,6 +906,8 @@ pub(super) fn setup_hud(
                 super::characters::CompletionLine,
                 centered(f, "", 17.0, GOLD),
             ));
+            // "New record!" and the place (`super::records`), empty when the run made no table.
+            root.spawn((super::records::RecordLine, centered(f, "", 22.0, GOLD)));
             // The run in numbers, one tile each.
             root.spawn(Node {
                 column_gap: Val::Px(12.0),
