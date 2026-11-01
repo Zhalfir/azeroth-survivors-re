@@ -728,7 +728,11 @@ pub(super) fn collect_gems(
     }
     while run.xp >= data::xp_to_next(run.level) {
         run.xp -= data::xp_to_next(run.level);
+        // The level's new health arrives filled, as WoW's does; the pool grows by more than
+        // HP_PER_LEVEL once Fortitude and talents multiply it, so take the real difference.
+        let before = run.stats().max_hp;
         run.level += 1;
+        run.hp = (run.hp + run.stats().max_hp - before).min(run.stats().max_hp);
         run.pending_levels += 1;
         if run.level == super::mobility::LEARN_LEVEL {
             if let Some(m) = super::mobility::for_class(run.class.id) {
