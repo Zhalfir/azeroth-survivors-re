@@ -13,8 +13,17 @@
 //! Both fold into [`Bonus`], which `Run::stats` applies after the run's own passives.
 //! `WOW_SURVIVORS_TALENTS=<n>` and `WOW_SURVIVORS_TIER=<0..3>` give an unattended run
 //! (`super::auto`) a character's power without one, for balance testing.
+//!
+//! **Icons.** The stats stay generic for balance; the pictures follow the class. Each tree's rows
+//! show the class's own talents from `Talent.dbc` (the first-column talent at tiers 1, 2, 3, 4 and
+//! 7, the 31-point one), matched to the tree by its `TalentTab.dbc` name ([`tree_icons`]), loaded
+//! once when the archives mount. Without the data the rows keep the generic icons.
+
+use std::collections::HashMap;
 
 use bevy::prelude::*;
+use benilla_assets::{LockRecover, WorldAssets};
+use benilla_formats::TalentCatalog;
 
 use super::characters::{Characters, LeftSlot};
 use super::data::{self, Difficulty, Stat};
@@ -167,6 +176,103 @@ pub(super) fn trees_of(class_id: u8) -> [(&'static str, Focus, &'static str); 3]
         .map_or(TREES[0].1, |(_, t)| *t)
 }
 
+/// The 0-based `Talent.dbc` tiers a tree's five rows take their icons from: 1, 2, 3, 4 and 7
+/// (the 31-point talent).
+const ICON_TIERS: [u32; 5] = [0, 1, 2, 3, 6];
+
+/// Today's icons for a class's trees: the focus's stat spells, and the class's first ability on
+/// the capstone.
+fn generic_icons(class_id: u8) -> [[u32; 5]; 3] {
+    let start = data::CLASSES
+        .iter()
+        .find(|k| k.id == class_id)
+        .map_or(0, |k| data::ability(k.start).spell);
+    trees_of(class_id).map(|(_, focus, _)| {
+        let r = rows(focus);
+        [r[0].spell, r[1].spell, r[2].spell, r[3].spell, start]
+    })
+}
+
+/// A tab's icon per row: the leftmost talent's first-rank spell at each of [`ICON_TIERS`], `None`
+/// where the tier is empty.
+fn tab_icons(talents: &[benilla_formats::Talent]) -> [Option<u32>; 5] {
+    ICON_TIERS.map(|tier| {
+        talents
+            .iter()
+            .filter(|t| t.row == tier && t.ranks[0] != 0)
+            .min_by_key(|t| t.col)
+            .map(|t| t.ranks[0])
+    })
+}
+
+/// Per tree and row, the spell whose icon the talent page shows: the class's own talents where
+/// `tabs` (a tree name and its talents) has the tree, the generic icon anywhere else.
+fn icons_from(class_id: u8, tabs: &[(String, Vec<benilla_formats::Talent>)]) -> [[u32; 5]; 3] {
+    let generic = generic_icons(class_id);
+    let trees = trees_of(class_id);
+    let mut out = generic;
+    for (t, (name, ..)) in trees.iter().enumerate() {
+        let Some((_, talents)) = tabs.iter().find(|(n, _)| n == name) else {
+            continue;
+        };
+        for (r, icon) in tab_icons(talents).into_iter().enumerate() {
+            if let Some(spell) = icon {
+                out[t][r] = spell;
+            }
+        }
+    }
+    out
+}
+
+/// A class's tree icons from the talent data ([`icons_from`]), or the generic ones without it.
+pub(super) fn tree_icons(catalog: Option<&TalentCatalog>, class_id: u8) -> [[u32; 5]; 3] {
+    let Some(catalog) = catalog else {
+        return generic_icons(class_id);
+    };
+    // Every shipped tab admits every race (mask 511): any race finds the class's three.
+    let tabs: Vec<(String, Vec<benilla_formats::Talent>)> = catalog
+        .tabs_for_class(1, class_id)
+        .into_iter()
+        .map(|tab| (tab.name.clone(), catalog.talents_in_tab(tab.id).to_vec()))
+        .collect();
+    icons_from(class_id, &tabs)
+}
+
+/// Every class's tree icons, by class id; empty (the generic icons) when the data would not load.
+#[derive(Resource, Default)]
+pub(super) struct TreeIcons(HashMap<u8, [[u32; 5]; 3]>);
+
+impl TreeIcons {
+    fn of(&self, class_id: u8) -> [[u32; 5]; 3] {
+        self.0
+            .get(&class_id)
+            .copied()
+            .unwrap_or_else(|| generic_icons(class_id))
+    }
+}
+
+/// Once the archives mount: every class's icons from `Talent.dbc`, then never again.
+fn load_tree_icons(mut commands: Commands, assets: Option<Res<WorldAssets>>) {
+    let Some(assets) = assets else { return };
+    let loaded = {
+        let mut chain = assets.chain.lock_recover();
+        benilla_formats::load_talent_catalog(&mut chain)
+    };
+    let icons = match loaded {
+        Ok(catalog) => TreeIcons(
+            TREES
+                .iter()
+                .map(|(id, _)| (*id, tree_icons(Some(&catalog), *id)))
+                .collect(),
+        ),
+        Err(e) => {
+            warn!("survivors: Talent.dbc failed, generic talent icons: {e:#}");
+            TreeIcons::default()
+        }
+    };
+    commands.insert_resource(icons);
+}
+
 /// Ranks spent, per tree and row.
 pub(super) type Spent = [[u8; 5]; 3];
 
@@ -309,7 +415,11 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<TalentPage>()
         .add_systems(Startup, spawn_page.after(super::characters::spawn_ui))
         .add_systems(OnEnter(Phase::Playing), apply_bonus)
-        .add_systems(Update, (press, show, rebuild).chain());
+        .add_systems(Update, (press, show, rebuild).chain())
+        .add_systems(
+            Update,
+            load_tree_icons.run_if(not(resource_exists::<TreeIcons>)),
+        );
 }
 
 /// Fold the character's talents and tier into the run, each time play (re)starts; a fresh run
@@ -544,9 +654,11 @@ fn rebuild(
     selection: Res<Selection>,
     font: Option<Res<HudFont>>,
     body: Query<Entity, With<PageBody>>,
-    mut built: Local<Option<(u32, Option<u32>)>>,
+    icons: Option<Res<TreeIcons>>,
+    mut built: Local<Option<(u32, Option<u32>, bool)>>,
 ) {
-    let key = (page.version, selection.character);
+    // Rebuilt once more when the class icons arrive.
+    let key = (page.version, selection.character, icons.is_some());
     if !page.open || *built == Some(key) {
         return;
     }
@@ -564,6 +676,7 @@ fn rebuild(
     let points = c.talent_points();
     let left = points.saturating_sub(spent_total(&c.talents));
     let tier = tier_of(c);
+    let tree_spells = icons.map_or_else(|| generic_icons(c.class_id), |i| i.of(c.class_id));
     commands.entity(body).despawn_related::<Children>();
     commands.entity(body).with_children(|ui| {
         ui.spawn(text(f, format!("{} — Talents", c.name), 34.0, GOLD));
@@ -611,15 +724,12 @@ fn rebuild(
                             let (stat, v) = capstone_stat(*focus);
                             super::hud::passive_text(stat, v)
                         };
-                        let (name, spell, max) = if r < 4 {
-                            (talents[r].name, talents[r].spell, ROW_RANKS[r])
+                        let (name, max) = if r < 4 {
+                            (talents[r].name, ROW_RANKS[r])
                         } else {
-                            let start = data::CLASSES
-                                .iter()
-                                .find(|k| k.id == c.class_id)
-                                .map_or(0, |k| data::ability(k.start).spell);
-                            (*capstone, start, 1)
+                            (*capstone, 1)
                         };
+                        let spell = tree_spells[t][r];
                         let have = c.talents[t][r];
                         let open = total >= ROW_GATE * r as u8;
                         let addable = can_add(&c.talents, t, r, points);
@@ -691,4 +801,58 @@ fn rebuild(
                 .with_child(text(f, "Back", 18.0, Color::WHITE));
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn talent(row: u32, col: u32, spell: u32) -> benilla_formats::Talent {
+        benilla_formats::Talent {
+            id: spell,
+            tab: 161,
+            row,
+            col,
+            ranks: [spell, spell + 1, 0, 0, 0],
+            prereq_talent: 0,
+            prereq_rank: 0,
+            required_spell: 0,
+            exceptional: false,
+        }
+    }
+
+    #[test]
+    fn tree_icons_fall_back_without_data() {
+        let generic = generic_icons(1);
+        assert_eq!(tree_icons(None, 1), generic);
+        // Today's icons: the focus rows' spells and the class's first ability on the capstone.
+        let start = data::ability(data::CLASSES.iter().find(|k| k.id == 1).unwrap().start).spell;
+        assert!(generic.iter().all(|tree| tree[4] == start));
+        assert_eq!(generic[0][0], rows(Focus::Offense)[0].spell);
+        // No tab matches a tree's name: generic throughout.
+        let stray = vec![("Gladiator".to_string(), vec![talent(0, 0, 900)])];
+        assert_eq!(icons_from(1, &stray), generic);
+        // An unknown class keeps a full set too.
+        assert_eq!(tree_icons(None, 200), generic_icons(200));
+    }
+
+    #[test]
+    fn tree_icons_take_the_first_column_at_tiers_1_to_4_and_7() {
+        // Arms: two talents a tier, the leftmost wins; tier 4 is empty, tier 7 has the capstone.
+        let arms = vec![
+            talent(0, 2, 102),
+            talent(0, 0, 100),
+            talent(1, 1, 110),
+            talent(2, 0, 120),
+            talent(4, 0, 140),
+            talent(6, 1, 160),
+        ];
+        let tabs = vec![("Arms".to_string(), arms)];
+        let icons = icons_from(1, &tabs);
+        let generic = generic_icons(1);
+        assert_eq!(icons[0], [100, 110, 120, generic[0][3], 160]);
+        // Fury and Protection had no data.
+        assert_eq!(icons[1], generic[1]);
+        assert_eq!(icons[2], generic[2]);
+    }
 }
