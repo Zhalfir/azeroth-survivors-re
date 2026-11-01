@@ -46,7 +46,7 @@ const ENTER_H: f32 = 60.0;
 const ENTER_GAP: f32 = 16.0;
 const DEMO_W: f32 = 150.0;
 /// The name line's foot: just over Enter World's row.
-const NAME_BOTTOM: f32 = ENTER_BOTTOM + ENTER_H + 10.0;
+pub(super) const NAME_BOTTOM: f32 = ENTER_BOTTOM + ENTER_H + 10.0;
 /// The difficulty picker's foot (`super::characters`): over the name line.
 pub(super) const DIFFICULTY_BOTTOM: f32 = NAME_BOTTOM + 34.0;
 
@@ -81,6 +81,9 @@ pub(super) struct RaceFace(u8);
 
 #[derive(Component)]
 pub(super) struct PickName;
+/// The name line's row: on create it stands above the name field (`super::characters`).
+#[derive(Component)]
+pub(super) struct PickNameRow;
 
 /// The race, gender and class tower: shown to create a character, hidden on character select
 /// (`super::characters`).
@@ -235,13 +238,16 @@ pub(super) fn build_menu(
         zone_frame(ui, &art, f);
 
         // `CharSelectCharacterName`, GlueFontNormalHuge, just over Enter World's row.
-        ui.spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(NAME_BOTTOM),
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        })
+        ui.spawn((
+            PickNameRow,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(NAME_BOTTOM),
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
         .with_children(|c| {
             outlined_text(
                 c,

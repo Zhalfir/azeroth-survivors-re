@@ -8,8 +8,10 @@
 //! completed, a difficulty picker above Enter World. **Create** shows the tower again, with a
 //! generated name and Create / Back where Enter World was ([`super::menu::EnterSlot`]). The name
 //! is a field: tapping it opens the soft keyboard (`Window::ime_enabled`, which winit 0.30 turns
-//! into `show_soft_input` on Android) with a caret; Enter, or a tap anywhere else, confirms
-//! ([`name_input`]). Delete takes a second tap to confirm.
+//! into `show_soft_input` on Android) with a caret. The tap selects the whole name, so the first
+//! letter replaces it ([`edit_name`]); while the keyboard is up the create bar rises to the top
+//! centre, over the keyboard. Enter, or a tap anywhere else, confirms ([`name_input`]); a tap on
+//! the focused field shows a dismissed keyboard again. Delete takes a second tap to confirm.
 //!
 //! Files, through [`crate::local_state`] so the page's store answers too:
 //! `benilla-config/characters/index.txt` (the ids, in order, then `active <id>`) and
@@ -289,6 +291,9 @@ struct NameCaret;
 /// The line under the name field: how to type, or how to confirm.
 #[derive(Component)]
 struct NameHint;
+/// The highlight behind the name while all of it is selected.
+#[derive(Component)]
+struct NameSel;
 #[derive(Component)]
 struct DeleteLabel;
 /// A locked difficulty button's second line: what opens it.
@@ -338,6 +343,13 @@ enum CharButton {
 /// The shortest and longest names, in letters.
 pub(super) const NAME_MIN: usize = 2;
 pub(super) const NAME_MAX: usize = 12;
+/// The create bar's top edge while the soft keyboard is up, in UI units.
+const KEYBOARD_TOP: f32 = 24.0;
+/// The race and class line's foot on create: over the create bar (field 48, hint, buttons 40,
+/// two gaps of 8: ~120 units from [`menu::ENTER_BOTTOM`]).
+const CREATE_LABEL_BOTTOM: f32 = menu::ENTER_BOTTOM + 128.0;
+/// The selection behind a name the first letter replaces.
+const NAME_SELECTED: Color = Color::srgba(0.2, 0.35, 0.75, 0.75);
 
 /// One edit to the name field.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -378,6 +390,18 @@ pub(super) fn name_input(name: &str, key: NameKey) -> String {
     }
 }
 
+/// One key on a name that may be all selected (`all`): the first letter replaces a selected
+/// name and Backspace clears it; Done keeps it. Returns the name and whether it stays selected.
+pub(super) fn edit_name(name: &str, all: bool, key: NameKey) -> (String, bool) {
+    match key {
+        NameKey::Char(c) if all && name_letter(c) => (name_input("", key), false),
+        // A key that is not a letter leaves the selection as it was.
+        NameKey::Char(_) if all => (name.to_string(), true),
+        NameKey::Backspace if all => (String::new(), false),
+        _ => (name_input(name, key), false),
+    }
+}
+
 /// Whether a typed name may be kept: [`NAME_MIN`] to [`NAME_MAX`] letters.
 pub(super) fn name_valid(name: &str) -> bool {
     let n = name.chars().count();
@@ -390,6 +414,11 @@ pub(super) fn name_valid(name: &str) -> bool {
 pub(super) struct NameFocus {
     pub on: bool,
     before: String,
+    /// The whole name is selected: the first letter replaces it.
+    all: bool,
+    /// The focused field was tapped again: the keyboard goes off for a frame and back on, which
+    /// shows it again after the system dismissed it ([`sync_ime`]).
+    reshow: bool,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -749,7 +778,20 @@ fn spawn_bars(commands: &mut Commands, f: &Handle<Font>) {
                 BorderColor::all(EDGE),
             ))
             .with_children(|field| {
-                field.spawn((text(f, "", 24.0, GOLD), NewName));
+                field
+                    .spawn((
+                        NameSel,
+                        Node {
+                            padding: UiRect::horizontal(Val::Px(2.0)),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                        Pickable::IGNORE,
+                    ))
+                    .with_children(|sel| {
+                        sel.spawn((text(f, "", 24.0, GOLD), NewName, Pickable::IGNORE));
+                    });
                 // Always in the layout, so the name does not shift as it blinks.
                 field.spawn((
                     NameCaret,
@@ -813,8 +855,11 @@ fn press(
         }
         match *action {
             CharButton::NameField => {
-                if !focus.on {
+                if focus.on {
+                    focus.reshow = true;
+                } else {
                     focus.on = true;
+                    focus.all = true;
                     focus.before = chars.new_name.clone();
                 }
             }
@@ -908,6 +953,8 @@ fn press(
 /// it had.
 fn release_name(focus: &mut NameFocus, chars: &mut Characters) {
     focus.on = false;
+    focus.all = false;
+    focus.reshow = false;
     let typed = name_input(&chars.new_name, NameKey::Done);
     let keep = if name_valid(&typed) {
         typed
@@ -948,17 +995,33 @@ fn type_name(
         if !k.state.is_pressed() {
             continue;
         }
+        // Android's Enter arrives as the key code with no logical key on some keyboards.
+        if matches!(k.key_code, KeyCode::Enter | KeyCode::NumpadEnter) {
+            keys.push(NameKey::Done);
+            continue;
+        }
         match &k.logical_key {
             Key::Backspace => keys.push(NameKey::Backspace),
             Key::Enter => keys.push(NameKey::Done),
             Key::Character(s) => keys.extend(s.chars().map(NameKey::Char)),
+            _ if k.key_code == KeyCode::Backspace => keys.push(NameKey::Backspace),
             _ => {}
         }
     }
+    let mut committed: Vec<NameKey> = Vec::new();
     for e in ime.read() {
         if let bevy::window::Ime::Commit { value, .. } = e {
-            keys.extend(value.chars().map(NameKey::Char));
+            committed.extend(value.chars().map(|c| match c {
+                '\n' | '\r' => NameKey::Done,
+                c => NameKey::Char(c),
+            }));
         }
+    }
+    // A desktop with the IME on sends each letter twice, as a key and as a commit: the commit
+    // wins, and the keys keep only Backspace and Enter.
+    if !committed.is_empty() {
+        keys.retain(|k| !matches!(k, NameKey::Char(_)));
+        keys.extend(committed);
     }
     let backgrounded = lifecycle.read().any(|l| {
         matches!(
@@ -977,18 +1040,20 @@ fn type_name(
         return;
     }
     let mut name = chars.new_name.clone();
+    let mut all = focus.all;
     for key in keys {
+        // Enter confirms and closes the keyboard; a name too short goes back to the one before.
         if key == NameKey::Done {
-            if name_valid(&name_input(&name, NameKey::Done)) {
-                if chars.new_name != name {
-                    chars.new_name = name;
-                }
-                release_name(&mut focus, &mut chars);
-                return;
+            if chars.new_name != name {
+                chars.new_name = name;
             }
-            continue;
+            release_name(&mut focus, &mut chars);
+            return;
         }
-        name = name_input(&name, key);
+        (name, all) = edit_name(&name, all, key);
+    }
+    if focus.all != all {
+        focus.all = all;
     }
     if chars.new_name != name {
         chars.new_name = name;
@@ -998,12 +1063,18 @@ fn type_name(
 /// The soft keyboard follows the field: shown while it has focus, hidden otherwise. Written only
 /// on a change, so winit is asked once.
 fn sync_ime(
-    focus: Res<NameFocus>,
+    mut focus: ResMut<NameFocus>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
 ) {
+    // A tap on the focused field: off this frame, on again the next, so winit asks Android to
+    // show the keyboard anew (a keyboard the system hid leaves `ime_enabled` on).
+    let want = focus.on && !focus.reshow;
+    if focus.reshow {
+        focus.reshow = false;
+    }
     for mut w in &mut windows {
-        if w.ime_enabled != focus.on {
-            w.ime_enabled = focus.on;
+        if w.ime_enabled != want {
+            w.ime_enabled = want;
         }
     }
 }
@@ -1021,6 +1092,7 @@ fn name_field(
     )>,
     mut caret: Query<&mut Visibility, With<NameCaret>>,
     mut edge: Query<&mut BorderColor, With<NameCaretField>>,
+    mut sel: Query<&mut BackgroundColor, With<NameSel>>,
 ) {
     if let Ok(mut t) = texts.p0().single_mut() {
         if t.0 != chars.new_name {
@@ -1041,13 +1113,25 @@ fn name_field(
     if !focus.is_changed() {
         return;
     }
+    let highlight = if focus.on && focus.all {
+        NAME_SELECTED
+    } else {
+        Color::NONE
+    };
+    for mut bg in &mut sel {
+        if bg.0 != highlight {
+            bg.0 = highlight;
+        }
+    }
     let border = BorderColor::all(if focus.on { GOLD } else { EDGE });
     for mut b in &mut edge {
         if *b != border {
             *b = border;
         }
     }
-    let hint = if focus.on {
+    let hint = if focus.on && focus.all {
+        "Type to replace · Enter to confirm"
+    } else if focus.on {
         "Letters only · Enter to confirm"
     } else {
         "Tap the name to type your own"
@@ -1167,6 +1251,7 @@ fn rebuild_rows(
 fn show(
     phase: Res<State<Phase>>,
     chars: Res<Characters>,
+    focus: Res<NameFocus>,
     mut panels: ParamSet<(
         Query<&mut Node, With<CharPanel>>,
         Query<&mut Node, With<DifficultyBar>>,
@@ -1174,6 +1259,7 @@ fn show(
         Query<&mut Node, With<TowerRoot>>,
         Query<&mut Node, With<EnterSlot>>,
         Query<&mut Node, With<QuitSlot>>,
+        Query<&mut Node, With<menu::PickNameRow>>,
     )>,
 ) {
     let menu = *phase.get() == Phase::Menu;
@@ -1203,6 +1289,30 @@ fn show(
     }
     for n in &mut panels.p5() {
         set(n, select);
+    }
+    // While the keyboard is up the bar rises to the top centre, over the keyboard, and comes
+    // back down when it closes.
+    let (top, bottom) = if create && focus.on {
+        (Val::Px(KEYBOARD_TOP), Val::Auto)
+    } else {
+        (Val::Auto, Val::Px(menu::ENTER_BOTTOM))
+    };
+    for mut n in &mut panels.p2() {
+        if n.top != top || n.bottom != bottom {
+            n.top = top;
+            n.bottom = bottom;
+        }
+    }
+    // The race and class line stands above the name field on create, under it nowhere.
+    let label = Val::Px(if create {
+        CREATE_LABEL_BOTTOM
+    } else {
+        menu::NAME_BOTTOM
+    });
+    for mut n in &mut panels.p6() {
+        if n.bottom != label {
+            n.bottom = label;
+        }
     }
 }
 
@@ -1547,6 +1657,20 @@ mod tests {
         assert!(!name_valid(""));
         assert!(name_valid("Abcdefghijkl"));
         assert!(!name_valid("Abcdefghijklm"));
+    }
+
+    #[test]
+    fn name_field_select_all_on_focus() {
+        // Focus selects the whole rolled name: the first letter replaces it.
+        assert_eq!(edit_name("Grommash", true, NameKey::Char('t')), ("T".into(), false));
+        // Then letters append as usual.
+        assert_eq!(edit_name("T", false, NameKey::Char('h')), ("Th".into(), false));
+        // Backspace on a selection clears it all.
+        assert_eq!(edit_name("Grommash", true, NameKey::Backspace), (String::new(), false));
+        // A key that is no letter keeps the selection and the name.
+        assert_eq!(edit_name("Grommash", true, NameKey::Char('7')), ("Grommash".into(), true));
+        // Without a selection Backspace takes one letter.
+        assert_eq!(edit_name("Grommash", false, NameKey::Backspace), ("Grommas".into(), false));
     }
 
     #[test]
