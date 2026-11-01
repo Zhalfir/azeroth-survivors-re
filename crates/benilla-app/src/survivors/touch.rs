@@ -5,8 +5,9 @@
 //! - Off the battleground (menu, level-up cards, pause, results) the first finger is the mouse:
 //!   it moves the cursor and holds the left button, so glue clicks, bevy_ui buttons and the menu
 //!   hero's drag-to-turn work unchanged.
-//! - In play, a finger that lands on the left half is a floating joystick that holds W/A/S/D and
-//!   points the cursor (the hero faces it) the way it runs; a finger on the right half aims the
+//! - In play, a finger that lands on the stick's half (left by default, right as a setting:
+//!   [`StickSide`]; the F/Q/C cluster then mirrors to the bottom-left) is a floating joystick that
+//!   holds W/A/S/D and points the cursor (the hero faces it) the way it runs; a finger on the other half aims the
 //!   cursor; the round buttons tap F (the class movement spell), Q (the potion, above-left of
 //!   F in the right thumb's cluster), C (lock / free the camera) and
 //!   Escape (pause), and the HUD's 2× toggle by the clock taps X (`super::speed`); two fingers pinch the camera in and out through the wheel. With the camera
@@ -28,6 +29,7 @@ use bevy::window::{CursorMoved, PrimaryWindow, WindowEvent};
 use super::action_button::ActionSource;
 use super::hero::{CamMode, CamRig};
 use super::hud::SAFE_BOTTOM;
+use super::settings::{stick_zone, StickSide};
 use super::Phase;
 
 /// How far, in logical pixels, the joystick's knob travels from where the thumb landed.
@@ -87,7 +89,7 @@ pub(super) fn plugin(app: &mut App) {
     .init_resource::<TouchState>()
     .add_systems(Startup, spawn_overlay.after(super::hud::setup_hud))
     .add_systems(PreUpdate, translate_touches.before(InputSystems))
-    .add_systems(Update, show_overlay);
+    .add_systems(Update, (place_cluster, show_overlay));
 }
 
 /// What a finger is doing, decided where it landed.
@@ -127,6 +129,10 @@ struct StickKnob;
 #[derive(Component)]
 /// A play button and the key it taps.
 struct PlayButton(KeyCode);
+/// A button of the thumb's action cluster (F, Q, C): its centre's inset from the side edge,
+/// which the stick's side picks ([`place_cluster`]).
+#[derive(Component)]
+struct ClusterInset(f32);
 /// The camera button's checked glow, shown while the camera is free.
 #[derive(Component)]
 struct CamGlow;
@@ -162,6 +168,7 @@ fn translate_touches(
     mut touches: MessageReader<TouchInput>,
     phase: Res<State<Phase>>,
     rig: Res<CamRig>,
+    side: Res<StickSide>,
     mut state: ResMut<TouchState>,
     play_buttons: ButtonRects,
     speed_buttons: SpeedRects,
@@ -222,7 +229,7 @@ fn translate_touches(
                     events.write(WindowEvent::KeyboardInput(ev.clone()));
                     keys.write(ev);
                     Role::Button(code)
-                } else if pos.x < size.x * 0.5
+                } else if stick_zone(*side, size).contains(pos)
                     && !state
                         .fingers
                         .values()
@@ -490,6 +497,7 @@ fn spawn_overlay(
                 Pickable::IGNORE,
                 Visibility::Hidden,
             ))
+            .insert_if(ClusterInset(inset.x - BUTTON_SIZE / 2.0), || from_bottom)
             .with_children(|slot| {
                 // The icon under the frame, as the HUD's mobility slot lays them.
                 let owner = slot.target_entity();
@@ -582,6 +590,29 @@ fn spawn_overlay(
                     ));
                 }
             });
+    }
+}
+
+/// The action cluster in the corner away from the stick: the bottom-right with the stick on the
+/// left, mirrored to the bottom-left with it on the right. Anchored to the side edge, so any
+/// aspect keeps it in the corner; touched only when the side changes (or the buttons arrive).
+fn place_cluster(
+    side: Res<StickSide>,
+    added: Query<(), Added<ClusterInset>>,
+    mut buttons: Query<(&ClusterInset, &mut Node)>,
+) {
+    if !side.is_changed() && added.is_empty() {
+        return;
+    }
+    for (inset, mut node) in &mut buttons {
+        let (left, right) = match *side {
+            StickSide::Left => (Val::Auto, Val::Px(inset.0)),
+            StickSide::Right => (Val::Px(inset.0), Val::Auto),
+        };
+        if node.left != left || node.right != right {
+            node.left = left;
+            node.right = right;
+        }
     }
 }
 

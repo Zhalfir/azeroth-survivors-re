@@ -2,7 +2,8 @@
 //! Ambience, each a volume and (but the effects) an on/off switch, the 1.12 CVars the mixer already
 //! follows and `config.toml` already keeps — and the live damage meter's switch
 //! ([`super::meter`]), the frame cap, the world's upscaler ([`super::upscale`]) and the screen shake
-//! ([`super::feedback`]). Touch-sized: volumes step in tens with − and +.
+//! ([`super::feedback`]), and on Android the joystick's side ([`StickSide`]). Touch-sized: volumes
+//! step in tens with − and +.
 
 use bevy::prelude::*;
 
@@ -29,6 +30,61 @@ const BUTTON: Color = Color::srgba(0.16, 0.11, 0.04, 0.95);
 const BUTTON_HOT: Color = Color::srgba(0.34, 0.22, 0.06, 0.95);
 const EDGE: Color = Color::srgba(0.8, 0.62, 0.25, 0.9);
 
+/// Which half of the screen the touch joystick takes (`super::touch`); the action cluster (F, Q,
+/// C) takes the other corner. Right suits smaller screens held one way (tablet feedback,
+/// 2026-11-01). Kept in `benilla-config/stick.txt`.
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(super) enum StickSide {
+    #[default]
+    Left,
+    Right,
+}
+
+impl StickSide {
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Self::Left => "Left",
+            Self::Right => "Right",
+        }
+    }
+
+    fn parse(s: &str) -> Self {
+        if s.trim().eq_ignore_ascii_case("right") {
+            Self::Right
+        } else {
+            Self::Left
+        }
+    }
+
+    fn path() -> Option<std::path::PathBuf> {
+        crate::local_state::home().map(|h| h.join("stick.txt"))
+    }
+
+    fn load() -> Self {
+        Self::path()
+            .and_then(|p| crate::local_state::read_to_string(&p).ok())
+            .map_or(Self::Left, |s| Self::parse(&s))
+    }
+
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    fn save(self) {
+        if let Some(p) = Self::path() {
+            let _ = crate::local_state::write_atomic(&p, self.name());
+        }
+    }
+}
+
+/// The screen region, in logical pixels, where a landing thumb becomes the joystick: the half
+/// on the stick's side, full height.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(super) fn stick_zone(side: StickSide, screen: Vec2) -> Rect {
+    let half = screen.x * 0.5;
+    match side {
+        StickSide::Left => Rect::new(0.0, 0.0, half, screen.y),
+        StickSide::Right => Rect::new(half, 0.0, screen.x, screen.y),
+    }
+}
+
 /// Whether the panel is open over the pause menu.
 #[derive(Resource, Default)]
 struct SettingsOpen(bool);
@@ -45,6 +101,8 @@ enum SettingsButton {
     FrameCap,
     Upscaler,
     Shake,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    Stick,
     Back,
 }
 
@@ -58,11 +116,14 @@ enum Readout {
     FrameCap,
     Upscaler,
     Shake,
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    Stick,
 }
 
 pub(super) fn plugin(app: &mut App) {
     DamageNumbers::load();
-    app.init_resource::<SettingsOpen>()
+    app.insert_resource(StickSide::load())
+        .init_resource::<SettingsOpen>()
         .add_systems(Update, (open_close, press, show, readouts).chain())
         .add_systems(OnExit(Phase::Paused), |mut open: ResMut<SettingsOpen>| {
             open.0 = false;
@@ -308,6 +369,30 @@ fn spawn_panel(commands: &mut Commands, font: &Handle<Font>) {
                     (text(font, "", 16.0, Color::WHITE), Readout::Shake),
                 );
             });
+            #[cfg(target_os = "android")]
+            root.spawn(Node {
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Node {
+                        width: Val::Px(310.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|c| {
+                    c.spawn(text(font, "Stick", 18.0, Color::WHITE));
+                });
+                button(
+                    row,
+                    SettingsButton::Stick,
+                    70.0,
+                    (text(font, "", 16.0, Color::WHITE), Readout::Stick),
+                );
+            });
             root.spawn(Node {
                 height: Val::Px(8.0),
                 ..default()
@@ -344,6 +429,7 @@ fn press(
     mut open: ResMut<SettingsOpen>,
     cvars: Option<ResMut<Cvars>>,
     mut meter: ResMut<MeterSetting>,
+    mut stick: ResMut<StickSide>,
 ) {
     let Some(mut cvars) = cvars else { return };
     for (interaction, action, mut bg) in &mut buttons {
@@ -380,6 +466,13 @@ fn press(
             SettingsButton::Upscaler => {
                 Upscaler::cycle();
             }
+            SettingsButton::Stick => {
+                *stick = match *stick {
+                    StickSide::Left => StickSide::Right,
+                    StickSide::Right => StickSide::Left,
+                };
+                stick.save();
+            }
             SettingsButton::Back => open.0 = false,
         }
     }
@@ -414,6 +507,7 @@ fn show(
 fn readouts(
     cvars: Option<Res<Cvars>>,
     meter: Res<MeterSetting>,
+    stick: Res<StickSide>,
     mut texts: Query<(&Readout, &mut Text)>,
 ) {
     let Some(cvars) = cvars else { return };
@@ -426,6 +520,7 @@ fn readouts(
             Readout::FrameCap => FrameCap::current().name().to_string(),
             Readout::Upscaler => Upscaler::current().name().to_string(),
             Readout::Shake => ShakeSetting::current().name().to_string(),
+            Readout::Stick => stick.name().to_string(),
         };
         if text.0 != want {
             text.0 = want;
@@ -435,4 +530,27 @@ fn readouts(
 
 fn on_off(on: bool) -> String {
     if on { "On" } else { "Off" }.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stick_zone_mirrors() {
+        let screen = Vec2::new(1200.0, 750.0);
+        let left = stick_zone(StickSide::Left, screen);
+        let right = stick_zone(StickSide::Right, screen);
+        assert_eq!(left, Rect::new(0.0, 0.0, 600.0, 750.0));
+        assert_eq!(right, Rect::new(600.0, 0.0, 1200.0, 750.0));
+        // Mirror images: a point and its reflection fall in opposite zones.
+        for p in [Vec2::new(100.0, 700.0), Vec2::new(590.0, 10.0)] {
+            let mirrored = Vec2::new(screen.x - p.x, p.y);
+            assert!(left.contains(p) && !right.contains(p));
+            assert!(right.contains(mirrored) && !left.contains(mirrored));
+        }
+        assert_eq!(StickSide::parse("Right\n"), StickSide::Right);
+        assert_eq!(StickSide::parse("left"), StickSide::Left);
+        assert_eq!(StickSide::parse(""), StickSide::Left);
+    }
 }
