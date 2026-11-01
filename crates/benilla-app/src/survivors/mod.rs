@@ -5,6 +5,7 @@
 //! off ([`crate::run_mode::CaptureMode`]).
 
 mod abilities;
+mod action_button;
 mod auto;
 mod bossbar;
 mod cards;
@@ -27,6 +28,7 @@ mod menu;
 mod meter;
 mod minimap;
 mod mobility;
+mod potion;
 mod records;
 mod secrets;
 mod settings;
@@ -78,7 +80,7 @@ impl Plugin for SurvivorsPlugin {
                 secrets::plugin,
                 speed::plugin,
             ))
-            .add_plugins(globe::plugin)
+            .add_plugins((globe::plugin, action_button::plugin))
             .init_state::<Phase>()
             .init_resource::<Rng>()
             .init_resource::<Selection>()
@@ -108,6 +110,7 @@ impl Plugin for SurvivorsPlugin {
                     hero::drop_stray_buttons,
                     hero::aim_cursor,
                     mobility::cast_mobility,
+                    potion::drink_potion,
                     hero::drive_hero,
                     // Before the client's shake adds its offset, which this would overwrite.
                     hero::place_camera.before(crate::camera_shake::apply_camera_shake),
@@ -359,6 +362,8 @@ pub(super) struct Run {
     pub heal_t: f32,
     /// The class mobility's cooldown and running effect.
     mobile: mobility::MobilityState,
+    /// The potion's cooldown left, in run seconds (`potion`).
+    pub potion_cd: f32,
     pub pending_levels: u32,
     pub bosses: u32,
     pub rings: u32,
@@ -408,6 +413,7 @@ impl Default for Run {
             heal_rate: 0.0,
             heal_t: 0.0,
             mobile: mobility::MobilityState::default(),
+            potion_cd: 0.0,
             pending_levels: 0,
             bosses: 0,
             rings: 0,

@@ -176,6 +176,14 @@ pub(super) fn end_demo(
     commands.remove_resource::<Auto>();
 }
 
+/// The bot drinks the potion below this share of its health, as a player saves it for trouble.
+const POTION_BELOW: f32 = 0.30;
+
+/// Whether the bot would drink now ([`super::potion::drink_potion`] still checks the cooldown).
+pub(super) fn wants_potion(run: &Run) -> bool {
+    run.hp < POTION_BELOW * run.stats().max_hp
+}
+
 /// The walk the autopilot steers, for [`super::hero::drive_hero`].
 pub(super) fn steer(auto: &Auto) -> Vec3 {
     auto.dir

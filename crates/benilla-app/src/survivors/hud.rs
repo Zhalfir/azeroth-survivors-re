@@ -113,45 +113,66 @@ pub(super) struct AbilitySweep {
 pub(super) struct MobilitySlot;
 #[derive(Component)]
 pub(super) struct MobilityIcon;
+/// The potion's action slot on the HUD, left of the mobility slot (desktop; the touch cluster
+/// carries its own on Android).
 #[derive(Component)]
-pub(super) struct MobilitySweep(Handle<SweepUiMaterial>);
-/// The whole seconds left on the mobility spell's cooldown, over its sweep.
-#[derive(Component)]
-pub(super) struct MobilityCd;
+#[cfg_attr(target_os = "android", allow(dead_code))]
+pub(super) struct PotionSlot;
 
-/// A mobility button's cooldown: the radial sweep and the seconds over it, as an action button
-/// shows them. Both the HUD's F slot and the touch button carry one ([`refresh_mobility`]).
-pub(super) fn mobility_cooldown(
-    slot: &mut ChildSpawnerCommands,
+/// One HUD action slot: the key over a `size`-unit button in `UI-Quickslot2`, its icon (marked
+/// `icon`) and the shared cooldown states ([`super::action_button`]).
+fn action_slot(
+    col: &mut ChildSpawnerCommands,
     mats: &mut Assets<SweepUiMaterial>,
-    font: &Handle<Font>,
-    size: f32,
+    f: &Handle<Font>,
+    key: &str,
+    tip: TipFor,
+    source: super::action_button::ActionSource,
+    icon: impl Bundle,
 ) {
-    let handle = mats.add(SweepUiMaterial { sweep: 0.0 });
-    slot.spawn((
+    col.spawn(centered(f, key, 18.0, Color::WHITE));
+    col.spawn((
         Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
+            width: Val::Px(MOBILITY_SIZE),
+            height: Val::Px(MOBILITY_SIZE),
             ..default()
         },
-        MaterialNode(handle.clone()),
-        MobilitySweep(handle),
-        Pickable::IGNORE,
-    ));
-    slot.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        Pickable::IGNORE,
+        Interaction::default(),
+        tip,
+        super::detail::TextKeepOut,
     ))
-    .with_children(|n| {
-        n.spawn((MobilityCd, centered(font, "", size, Color::WHITE)));
+    .with_children(|slot| {
+        let owner = slot.target_entity();
+        // `UI-Quickslot2` is the empty slot's 64×64 frame, the button 36 inside it.
+        slot.spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(-MOBILITY_SIZE * 0.42),
+                top: Val::Px(-MOBILITY_SIZE * 0.42),
+                width: Val::Px(MOBILITY_SIZE * 1.84),
+                height: Val::Px(MOBILITY_SIZE * 1.84),
+                ..default()
+            },
+            ImageNode {
+                color: Color::NONE,
+                ..default()
+            },
+            UiArt::crop("Interface\\Buttons\\UI-Quickslot2", [0.0, 1.0, 0.0, 1.0]),
+        ));
+        slot.spawn((
+            icon,
+            super::action_button::ActionIcon(owner),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..default()
+            },
+            ImageNode {
+                color: Color::srgba(0.0, 0.0, 0.0, 0.6),
+                ..default()
+            },
+        ));
+        super::action_button::spawn_overlay(slot, mats, f, 18.0, source);
     });
 }
 #[derive(Component)]
@@ -205,6 +226,7 @@ pub(super) enum TipFor {
     Ability(usize),
     Passive(usize),
     Mobility,
+    Potion,
 }
 
 /// The one `GameTooltip`, and the column its lines go in.
@@ -489,48 +511,41 @@ pub(super) fn setup_hud(
                 },
             ))
             .with_children(|col| {
-                col.spawn(centered(f, "F", 18.0, Color::WHITE));
-                col.spawn((
-                    Node {
-                        width: Val::Px(MOBILITY_SIZE),
-                        height: Val::Px(MOBILITY_SIZE),
-                        ..default()
-                    },
-                    Interaction::default(),
+                action_slot(
+                    col,
+                    &mut sweeps_init,
+                    f,
+                    "F",
                     TipFor::Mobility,
-                    super::detail::TextKeepOut,
-                ))
-                .with_children(|slot| {
-                    // `UI-Quickslot2` is the empty slot's 64×64 frame, the button 36 inside it.
-                    slot.spawn((
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(-MOBILITY_SIZE * 0.42),
-                            top: Val::Px(-MOBILITY_SIZE * 0.42),
-                            width: Val::Px(MOBILITY_SIZE * 1.84),
-                            height: Val::Px(MOBILITY_SIZE * 1.84),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::NONE,
-                            ..default()
-                        },
-                        UiArt::crop("Interface\\Buttons\\UI-Quickslot2", [0.0, 1.0, 0.0, 1.0]),
-                    ));
-                    slot.spawn((
-                        MobilityIcon,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        ImageNode {
-                            color: Color::srgba(0.0, 0.0, 0.0, 0.6),
-                            ..default()
-                        },
-                    ));
-                    mobility_cooldown(slot, &mut sweeps_init, f, 18.0);
-                });
+                    super::action_button::ActionSource::Mobility,
+                    MobilityIcon,
+                );
+            });
+            // The potion, one slot left of the mobility. On Android the touch cluster has it.
+            #[cfg(not(target_os = "android"))]
+            root.spawn((
+                PotionSlot,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    bottom: Val::Px(SAFE_BOTTOM + 4.0),
+                    margin: UiRect::left(Val::Px(-MOBILITY_SIZE * 2.0 - 16.0)),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(2.0),
+                    ..default()
+                },
+            ))
+            .with_children(|col| {
+                action_slot(
+                    col,
+                    &mut sweeps_init,
+                    f,
+                    "Q",
+                    TipFor::Potion,
+                    super::action_button::ActionSource::Potion,
+                    SpellIcon(super::potion::POTION_SPELL),
+                );
             });
             root.spawn(Node {
                 width: Val::Percent(100.0),
@@ -1625,16 +1640,13 @@ pub(super) fn fill_icons(
     }
 }
 
-/// The mobility button: shown once learned, its icon the class's spell, its sweep the cooldown.
+/// The mobility button: shown once learned, its icon the class's spell.
 #[allow(clippy::type_complexity)]
 pub(super) fn refresh_mobility(
     run: Res<Run>,
     mut commands: Commands,
     mut slot: Query<&mut Node, With<MobilitySlot>>,
     icon: Query<(Entity, Option<&SpellIcon>), With<MobilityIcon>>,
-    sweep: Query<&MobilitySweep>,
-    mut seconds: Query<&mut Text, With<MobilityCd>>,
-    mut mats: ResMut<Assets<SweepUiMaterial>>,
 ) {
     let def = run.mobility();
     if let Ok(mut node) = slot.single_mut() {
@@ -1655,24 +1667,6 @@ pub(super) fn refresh_mobility(
                 .entity(e)
                 .remove::<IconDone>()
                 .insert(SpellIcon(def.spell));
-        }
-    }
-    let f = (run.mobile.cd / def.cooldown.max(0.01)).clamp(0.0, 1.0);
-    for s in &sweep {
-        if mats.get(&s.0).is_some_and(|m| m.sweep != f) {
-            if let Some(m) = mats.get_mut(&s.0) {
-                m.sweep = f;
-            }
-        }
-    }
-    let left = if run.mobile.cd > 0.05 {
-        format!("{}", run.mobile.cd.ceil() as u32)
-    } else {
-        String::new()
-    };
-    for mut t in &mut seconds {
-        if t.0 != left {
-            t.0 = left.clone();
         }
     }
 }
@@ -2384,6 +2378,31 @@ pub(super) fn icon_tooltip(
                 TipLine::new(m.desc, GOLD),
             ]
         }),
+        TipFor::Potion => {
+            let heal = super::potion::potion_heal(data::difficulty());
+            Some(vec![
+                TipLine::new(
+                    spell_name(
+                        spells.as_deref(),
+                        super::potion::POTION_SPELL,
+                        "Healing Potion",
+                    ),
+                    Color::WHITE,
+                )
+                .header(),
+                TipLine::new(&format!("{PRESS} Q"), Color::WHITE).right(
+                    format!("{} sec cooldown", num(super::potion::POTION_COOLDOWN)),
+                    Color::WHITE,
+                ),
+                TipLine::new(
+                    &format!(
+                        "Restores {}% of your health at once.",
+                        (heal * 100.0).round()
+                    ),
+                    GOLD,
+                ),
+            ])
+        }
     };
     let Some(lines) = lines else { return };
     *shown = Some((tip, run.version));

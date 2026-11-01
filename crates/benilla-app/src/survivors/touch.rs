@@ -7,7 +7,8 @@
 //!   hero's drag-to-turn work unchanged.
 //! - In play, a finger that lands on the left half is a floating joystick that holds W/A/S/D and
 //!   points the cursor (the hero faces it) the way it runs; a finger on the right half aims the
-//!   cursor; the round buttons tap F (the class movement spell), C (lock / free the camera) and
+//!   cursor; the round buttons tap F (the class movement spell), Q (the potion, above-left of
+//!   F in the right thumb's cluster), C (lock / free the camera) and
 //!   Escape (pause), and the HUD's 2× toggle by the clock taps X (`super::speed`); two fingers pinch the camera in and out through the wheel. With the camera
 //!   free, a finger on the right half drags it around the hero instead, as a held right button.
 //!
@@ -24,6 +25,7 @@ use bevy::prelude::*;
 use bevy::ui::{ComputedNode, UiGlobalTransform, UiScale};
 use bevy::window::{CursorMoved, PrimaryWindow, WindowEvent};
 
+use super::action_button::ActionSource;
 use super::hero::{CamMode, CamRig};
 use super::hud::SAFE_BOTTOM;
 use super::Phase;
@@ -34,18 +36,25 @@ const STICK_RADIUS: f32 = 70.0;
 const STICK_DEAD: f32 = 0.35;
 /// How far ahead of the hero the joystick points the cursor.
 const STICK_AIM: f32 = 160.0;
-/// A play button's side, in UI units (the HUD's, 768 to the screen's height): an action slot
-/// half again the HUD's own 40, for a thumb.
-const BUTTON_SIZE: f32 = 60.0;
-/// The play buttons: the key each taps, its icon (`None`: the class's movement spell, filled
-/// once learned), and its centre's inset in UI units from the right edge and from the bottom
-/// (`true`) or top edge. Pause sits under the minimap, the rest by the right thumb, their feet
-/// over the gesture-bar band ([`SAFE_BOTTOM`]).
-const BUTTONS: [(KeyCode, Option<&str>, Vec2, bool); 3] = [
+/// A play button's side, in UI units (the HUD's, 768 to the screen's height): the action
+/// cluster's 64 at least, for a thumb.
+const BUTTON_SIZE: f32 = 64.0;
+/// The play buttons: the key each taps, its icon (`None`: a spell's, the class's movement spell
+/// once learned or the potion's), and its centre's inset in UI units from the right edge and from
+/// the bottom (`true`) or top edge. Pause sits under the minimap, the rest by the right thumb,
+/// their feet over the gesture-bar band ([`SAFE_BOTTOM`]). The potion sits above-left of the
+/// mobility, ~105 units centre to centre, so neither's 0.75× hit circle reaches the other.
+const BUTTONS: [(KeyCode, Option<&str>, Vec2, bool); 4] = [
     (
         super::mobility::KEY,
         None,
         Vec2::new(70.0, SAFE_BOTTOM + 108.0),
+        true,
+    ),
+    (
+        super::potion::POTION_KEY,
+        None,
+        Vec2::new(155.0, SAFE_BOTTOM + 169.0),
         true,
     ),
     (
@@ -430,6 +439,7 @@ fn circle(radius: f32, color: Color, place: impl FnOnce(&mut Node)) -> impl Bund
 fn hint(key: KeyCode) -> &'static str {
     match key {
         KeyCode::KeyF => "F",
+        KeyCode::KeyQ => "Q",
         KeyCode::KeyC => "C",
         // A tablet has no Escape key; the button opens the pause menu.
         KeyCode::Escape => "Menu",
@@ -482,6 +492,7 @@ fn spawn_overlay(
             ))
             .with_children(|slot| {
                 // The icon under the frame, as the HUD's mobility slot lays them.
+                let owner = slot.target_entity();
                 let mut art = slot.spawn((
                     Node {
                         width: Val::Percent(100.0),
@@ -491,13 +502,24 @@ fn spawn_overlay(
                     hidden.clone(),
                     Pickable::IGNORE,
                 ));
-                match icon {
-                    Some(path) => art.insert(super::hud::UiArt::crop(path, ICON_CROP)),
-                    None => art.insert(MobilityButtonIcon),
+                let source = match (icon, key) {
+                    (Some(path), _) => {
+                        art.insert(super::hud::UiArt::crop(path, ICON_CROP));
+                        None
+                    }
+                    (None, k) if k == super::potion::POTION_KEY => {
+                        art.insert(super::hud::SpellIcon(super::potion::POTION_SPELL));
+                        Some(ActionSource::Potion)
+                    }
+                    (None, _) => {
+                        art.insert(MobilityButtonIcon);
+                        Some(ActionSource::Mobility)
+                    }
                 };
-                // The movement spell's cooldown, as on the HUD's F slot.
-                if key == super::mobility::KEY {
-                    super::hud::mobility_cooldown(slot, &mut sweeps, f, 24.0);
+                // The spell buttons' cooldown states, as on the HUD's slots.
+                if let Some(source) = source {
+                    art.insert(super::action_button::ActionIcon(owner));
+                    super::action_button::spawn_overlay(slot, &mut sweeps, f, 24.0, source);
                 }
                 // The key hint, clear of the slot frame's ring.
                 let mut label = Node {
